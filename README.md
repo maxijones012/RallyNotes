@@ -74,3 +74,11 @@ Validación local: 672 verificaciones del motor de navegación y 423 de presenta
 - Corrección adicional: los marcadores de destino deben elegirse, evitando mandar la ruta por defecto a otra ciudad.
 
 **Importante:** prueba de UI en Motorola pendiente; la búsqueda online no garantiza ubicación exacta de todos los domicilios y el rumbo de ruta es una aproximación geométrica, no detección visual de la calzada.
+
+## 0.2.4 — Pack offline de copiloto (redistribución revisada)
+
+- Selector en Ajustes: **Voz del sistema**, **CarlFM (nítido)**, **CarlFM (radio)**; prueba de notas y efecto de intercomunicador.
+- Audio grabado por síntesis de frases en **GitHub Actions** usando la voz CarlFM del catálogo MIT de Piper (modelo entrenado desde cero con datos indicados como dominio público). El modelo ni el motor Piper se incorporan al APK: solo fragmentos de audio OGG redistribuibles y avisos de atribución.
+- El reproductor cancela frases obsoletas, encadena segmentos sin conexión y conserva TTS Android como alternativa automática si no se instaló el pack.
+- Para compilar desde Android Studio sin conexión necesitás primero generar los recursos con `scripts/generate_rally_voice.py` en una máquina de desarrollo con Piper instalado. La acción de GitHub los genera automáticamente.
+- Nota: el audio tiene acento español peninsular, **no** voz de un copiloto profesional grabado. No usamos material de DiRT Rally, Sideways ni terceros sin licencia de redistribución.
