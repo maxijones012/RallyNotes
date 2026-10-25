@@ -35,9 +35,9 @@ object RouteServices {
     fun route(start: GeoPoint, via: List<GeoPoint>, end: GeoPoint): List<GeoPoint> {
         require(via.size <= 4) { "Demasiadas paradas intermedias" }
         // Non-commercial demo server. Calls happen only via user interaction.
-        val coords = (listOf(start) + via + end).joinToString(";") { "${it.longitude},${it.latitude}" }
+        val waypointsString = (listOf(start) + via + end).joinToString(";") { "${it.longitude},${it.latitude}" }
         val url = "https://router.project-osrm.org/route/v1/driving/" +
-            coords +
+            waypointsString +
             "?overview=full&geometries=geojson&steps=false"
         val result = JSONObject(get(url))
         check(result.optString("code") == "Ok") { "No se encontró un recorrido" }
