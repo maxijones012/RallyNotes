@@ -24,13 +24,29 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
+      - name: Preparar audio offline redistribuible CarlFM
+        run: |
+          python3 -m pip install --disable-pip-version-check 'piper-tts==1.8.0'
+          python3 scripts/generate_rally_voice.py
       - name: Pruebas automatizadas Android (JVM)
         run: gradle :app:testDebugUnitTest --no-daemon --stacktrace
-      - name: Compilar APK de prueba
+      - name: Compilar APK de prueba con voz offline
         run: gradle :app:assembleDebug --no-daemon --stacktrace
+      - name: Verificar audio dentro de APK
+        run: |
+          python3 - <<'PY'
+          import zipfile, pathlib
+          apk=pathlib.Path('app/build/outputs/apk/debug/app-debug.apk')
+          with zipfile.ZipFile(apk) as z:
+              names=[n for n in z.namelist() if n.startswith('res/raw/') and 'rally_carlfm' in n]
+              # Android AAPT2 puede renombrar/comprimir los recursos raw en el APK,
+              # pero el contenido audio también se valida antes con el script generador.
+              print('Recursos raw de CarlFM en APK:',len(names))
+              assert len(names) >= 130, 'Faltan clips pregrabados en APK'
+          PY
       - name: Publicar APK descargable
         uses: actions/upload-artifact@v4
         with:
-          name: Rally-GPS-AI-v0.2.3-debug
+          name: Rally-GPS-AI-v0.2.4-CarlFM-debug
           path: app/build/outputs/apk/debug/app-debug.apk
           retention-days: 14
