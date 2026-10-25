@@ -32,10 +32,12 @@ object RouteServices {
         return GeoPoint(item.getString("lat").toDouble(), item.getString("lon").toDouble())
     }
 
-    fun route(start: GeoPoint, end: GeoPoint): List<GeoPoint> {
-        // Non-commercial demo server. Do not call more than once a second or run as a production backend.
+    fun route(start: GeoPoint, via: List<GeoPoint>, end: GeoPoint): List<GeoPoint> {
+        require(via.size <= 4) { "Demasiadas paradas intermedias" }
+        // Non-commercial demo server. Calls happen only via user interaction.
+        val coords = (listOf(start) + via + end).joinToString(";") { "${it.longitude},${it.latitude}" }
         val url = "https://router.project-osrm.org/route/v1/driving/" +
-            "${start.longitude},${start.latitude};${end.longitude},${end.latitude}" +
+            coords +
             "?overview=full&geometries=geojson&steps=false"
         val result = JSONObject(get(url))
         check(result.optString("code") == "Ok") { "No se encontró un recorrido" }
@@ -47,7 +49,7 @@ object RouteServices {
             val item = coords.getJSONArray(i)
             out.add(GeoPoint(item.getDouble(1), item.getDouble(0)))
         }
-        check(out.size >= 2) { "Geometría de ruta vacía" }
+        check(out.size >= 2 && out.size <= 30000) { "Ruta inválida o demasiado grande" }
         return out
     }
 }
