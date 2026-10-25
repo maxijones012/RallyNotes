@@ -23,11 +23,13 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
+      - name: Pruebas automatizadas Android (JVM)
+        run: gradle :app:testDebugUnitTest --no-daemon --stacktrace
       - name: Compilar APK de prueba
-        run: gradle :app:assembleDebug --no-daemon
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
       - name: Publicar APK descargable
         uses: actions/upload-artifact@v4
         with:
-          name: Rally-GPS-AI-debug
+          name: Rally-GPS-AI-v0.2.0-debug
           path: app/build/outputs/apk/debug/app-debug.apk
           retention-days: 14
