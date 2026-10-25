@@ -57,6 +57,8 @@ class MainActivity : Activity(), LocationListener {
     private var navigating = false
     private var demo = false
     private var map3d = true
+    private val drivingCamera = DrivingCamera()
+    private var followRouteCamera = true
     private var voiceOn = true
     private var warnFactor = 1
     private var positionIndex = 0
@@ -363,15 +365,38 @@ class MainActivity : Activity(), LocationListener {
     }
     private fun lookupPlace() {
         val name = searchInput.text.toString().trim()
-        if (name.length < 3) { status("Escribí un destino de al menos 3 caracteres", true); return }
-        execute("Buscando destino", { RouteServices.search(name) }) { result ->
-            target = result as? GeoPoint
-            if (target == null) status("No encontré ese destino", true)
-            else {
-                drawWaypoints()
-                map?.animateCamera(CameraUpdateFactory.newLatLngZoom(LatLng(target!!.latitude, target!!.longitude), 13.0))
-                status("Destino elegido: ${name.take(38)} · tocá TRAZAR RUTA", false)
+        if (name.length < 3) { status("Escribí una dirección o lugar para buscar", true); return }
+        // No establecer automáticamente la primera coincidencia global.
+        // En calles sin numeración OSM, pedir al usuario confirmar el punto aproximado.
+        val reference = gps ?: chosenOrigin
+        execute("Buscando lugares cerca de tu ubicación", { RouteServices.searchResults(name, reference) }) { result ->
+            @Suppress("UNCHECKED_CAST")
+            val matches = result as List<RouteServices.PlaceCandidate>
+            if (matches.isEmpty()) {
+                status("Sin resultados. Probá: calle y altura, ciudad, provincia", true)
+                return@execute
             }
+            val entries = matches.map { match ->
+                val distance = match.distanceKm?.let { "  ·  ${"%.1f".format(Locale("es", "AR"),it)} km" } ?: ""
+                val accuracy = if (match.approximate) "⚠ Ubicación aproximada · " else ""
+                "${accuracy}${match.address.take(150)}$distance"
+            }.toTypedArray()
+            android.app.AlertDialog.Builder(this)
+                .setTitle("ELEGÍ EL DESTINO CORRECTO")
+                .setItems(entries) { _, index ->
+                    val choice = matches[index]
+                    target = choice.point
+                    searchInput.setText(name)
+                    drawWaypoints()
+                    map?.animateCamera(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder()
+                        .target(LatLng(choice.point.latitude,choice.point.longitude))
+                        .zoom(16.0).bearing(0.0).tilt(0.0).build()), 550)
+                    status(if (choice.approximate)
+                        "Punto aproximado: confirmá la altura en el mapa antes de trazar"
+                    else "Destino elegido · tocá TRAZAR RUTA", choice.approximate)
+                }
+                .setNegativeButton("CANCELAR", null)
+                .show()
         }
     }
     private fun mainAction() {
@@ -400,7 +425,7 @@ class MainActivity : Activity(), LocationListener {
         setPreparedPlan(PaceNoteEngine.createPlan(points), save)
 
     private fun setPreparedPlan(parsed: RoutePlan, save: Boolean) {
-        plan = parsed; navigator = NavigationEngine(parsed) { warnFactor }
+        plan = parsed; navigator = NavigationEngine(parsed) { warnFactor }; drivingCamera.reset()
         positionIndex = 0; lastSpoken = -1; currentNote = 0
         navigating = false; demo = false; demoPosition = 0.0
         action.text = "INICIAR GPS"; nextButton.text = "DEMO"
@@ -418,10 +443,13 @@ class MainActivity : Activity(), LocationListener {
     private fun startGpsNavigation() {
         if (gps == null) { requestGps(); status("Esperando GPS", true); return }
         navigating = true; demo = false; positionIndex = 0; lastSpoken = -1; currentNote = 0
-        navigator?.reset(); showDrivingControls(false)
+        navigator?.reset(); drivingCamera.reset(); followRouteCamera = true; showDrivingControls(false)
         action.text = "FINALIZAR"; nextButton.text = "DEMO"
         status("GPS activo · notas estimadas del trazado · respetá la señalización", false)
-        lastLocation?.let { updateProgress(GeoPoint(it.latitude,it.longitude), it.speed) }
+        lastLocation?.let {
+            updateProgress(GeoPoint(it.latitude,it.longitude), it.speed)
+            drawPosition(GeoPoint(it.latitude,it.longitude))
+        }
     }
     private fun startDemo() {
         if (demo) { demo=false; nextButton.text="DEMO"; action.text="INICIAR GPS"; showDrivingControls(true); return }
@@ -431,7 +459,7 @@ class MainActivity : Activity(), LocationListener {
             status("RUTA SIMULADA: no corresponde a calles reales", false)
         }
         demo = true; navigating = false; demoPosition = 0.0; positionIndex=0; lastSpoken=-1
-        navigator?.reset(); showDrivingControls(false)
+        navigator?.reset(); drivingCamera.reset(); followRouteCamera = true; showDrivingControls(false)
         action.text = "FINALIZAR"; nextButton.text="PAUSA"
         val tick = object : Runnable {
             override fun run() {
@@ -556,25 +584,40 @@ class MainActivity : Activity(), LocationListener {
             s.addLayer(CircleLayer("rally_me_layer","rally_me").withProperties(
                 circleColor(sky),circleRadius(9f),circleStrokeColor("#FFFFFF"),circleStrokeWidth(3f)))
         } else source.setGeoJson(f)
-        if (navigating || demo) {
+        if ((navigating || demo) && followRouteCamera) {
+            val route = plan ?: return
+            val progressM = if (demo) demoPosition else navigator?.locate(p)?.metres ?: 0.0
+            val speed = if (demo) demoSpeed else lastLocation?.speed?.toDouble() ?: 0.0
+            val pose = drivingCamera.pose(route, progressM, speed, map3d)
             map?.animateCamera(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder()
-                .target(LatLng(p.latitude,p.longitude)).zoom(if(map3d) 16.2 else 15.5)
-                .tilt(if(map3d) 45.0 else 0.0)
-                .bearing(if(!demo && lastLocation?.hasBearing()==true) lastLocation!!.bearing.toDouble() else 0.0)
-                .build()),400)
+                .target(LatLng(pose.focus.latitude, pose.focus.longitude))
+                .zoom(pose.zoom).tilt(pose.tilt).bearing(pose.bearing).build()), if (demo) 430 else 650)
         }
+
     }
     private fun drawLocation() { gps?.let { drawPosition(it) } }
     private fun toggle3D() {
-        map3d = !map3d; modeButton.text=if(map3d) "3D" else "2D"
-        (gps ?: plan?.points?.firstOrNull())?.let { point ->
+        map3d = !map3d
+        modeButton.text = if (map3d) "3D" else "2D"
+        drivingCamera.reset()
+        val live = if (demo) plan?.points?.getOrNull(positionIndex) else gps
+        if ((navigating || demo) && live != null) drawPosition(live)
+        else (gps ?: plan?.points?.firstOrNull())?.let { point ->
             map?.animateCamera(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder()
-                .target(LatLng(point.latitude,point.longitude)).zoom(15.0).tilt(if(map3d)45.0 else 0.0).build()),450)
+                .target(LatLng(point.latitude,point.longitude)).zoom(15.5)
+                .tilt(if(map3d) 50.0 else 0.0).bearing(0.0).build()), 450)
         }
     }
     private fun centerGps() {
+        if (navigating || demo) {
+            followRouteCamera = true
+            val current = if (demo) plan?.points?.getOrNull(positionIndex) else gps
+            current?.let { drawPosition(it) }
+            return
+        }
         val p = gps ?: run { requestGps(); status("Esperando ubicación GPS",true);return }
-        map?.animateCamera(CameraUpdateFactory.newLatLngZoom(LatLng(p.latitude,p.longitude),15.5),450)
+        map?.animateCamera(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder()
+            .target(LatLng(p.latitude,p.longitude)).zoom(15.5).tilt(0.0).bearing(0.0).build()),450)
     }
     private fun requestGps() {
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
@@ -604,9 +647,9 @@ class MainActivity : Activity(), LocationListener {
         val ageNs = android.os.SystemClock.elapsedRealtimeNanos() - location.elapsedRealtimeNanos
         if (ageNs > 15_000_000_000L || ageNs < -2_000_000_000L) return
         gps = GeoPoint(location.latitude,location.longitude); lastLocation=location
-        if (!demo) drawPosition(gps!!)
-        if (firstGpsCamera) { firstGpsCamera=false; centerGps() }
         if (navigating) updateProgress(gps!!, location.speed)
+        if (!demo) drawPosition(gps!!)
+        if (firstGpsCamera) { firstGpsCamera=false; if (!navigating) centerGps() }
         if (!navigating && !demo) status("GPS disponible · mantené pulsado el mapa para elegir destino",false)
     }
 
