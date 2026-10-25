@@ -1,6 +1,6 @@
 # Rally GPS AI 🏁
 
-Aplicación Android **nueva e independiente**, inspirada en funciones de Sideways y Rally SatNav. No contiene código, recursos visuales ni audios propietarios de esas aplicaciones. Paquete: `ar.com.rallygpsai`. **Estado: etapas 1–8, versión experimental 0.2.1.**
+Aplicación Android **nueva e independiente**, inspirada en funciones de Sideways y Rally SatNav. No contiene código, recursos visuales ni audios propietarios de esas aplicaciones. Paquete: `ar.com.rallygpsai`. **Estado: etapas 1–8, versión experimental 0.2.3.**
 
 ## Incluido en esta entrega
 
@@ -16,7 +16,7 @@ Aplicación Android **nueva e independiente**, inspirada en funciones de Sideway
 
 1. Abrir el proyecto con Android Studio reciente (JDK 17, SDK 35) y sincronizar Gradle.
 2. Compilar `:app:assembleDebug` e instalar `app/build/outputs/apk/debug/app-debug.apk`.
-3. Si está en GitHub, abrir pestaña **Actions** > `APK Android (Rally GPS AI)` > artefacto `Rally-GPS-AI-v0.2.0-debug` cuando la ejecución termine satisfactoriamente.
+3. Si está en GitHub, abrir pestaña **Actions** > `APK Android (Rally GPS AI)` > artefacto `Rally-GPS-AI-v0.2.3-debug` cuando la ejecución termine satisfactoriamente.
 4. Dar permiso de ubicación; comprobar conexión y datos móviles si vas a trazar rutas. El modo DEMO y archivos GPX funcionan sin acceder al cálculo de rutas online.
 
 ## Uso
@@ -29,7 +29,10 @@ Opcional: PUNTOS → elegir origen o paradas en el mapa → BUSCAR destino → T
 
 - GPS/voz actualmente funcionan **solo con la actividad en primer plano**. El servicio de navegación en segundo plano, con pantalla bloqueada, todavía no está implementado.
 - El GPS y el mapa no ofrecen descarga de regiones offline; una ruta GPX existente y sus notas pueden ser calculadas sin internet, pero el mapa necesita datos de tiles.
-- No se recalcula automáticamente la ruta cuando el conductor se desvía (la app pausa notas cuando está lejos o el GPS es impreciso).
+- **Recálculo de desvíos (versión experimental):** si el navegador detecta 3 posiciones GPS fiables fuera de ruta durante más de 3 segundos y a 85 m o más del trazado, solicita una ruta nueva desde la ubicación actual, conservando destino y paradas todavía pendientes. Limita la frecuencia a un intento cada 50 s; se conserva la ruta antigua si falla el servicio. Necesita internet para recalcular. No se recalculan rutas GPX importadas ni DEMO.
+- **Voces descargadas:** Ajustes > Elegir voz en español permite seleccionar una voz offline ya instalada en el motor TTS del sistema, escuchar muestra y configurar ritmo/tono; Ajustes > Instalar o cambiar motor TTS abre el panel del dispositivo. RHVoice y SherpaTTS son opciones externas descargables; la aplicación no distribuye paquetes de voces de terceros ni garantiza que todos estén disponibles en cada teléfono.
+- El motor OSRM público sigue siendo exclusivamente de demostración y no garantiza disponibilidad; para un producto público hace falta un servicio propio/autorizado.
+- La navegación con pantalla bloqueada todavía no funciona; exige la aplicación en primer plano.
 - Las notas automáticas se basan solo en la geometría, no infieren saltos, rasantes ni peligros de terreno.
 - El servidor de rutas público OSRM demo **no es apto para publicar una app masiva**. Migrar a backend propio licenciado antes de producción.
 - La búsqueda por Nominatim no es autocompletado; realiza una consulta manual por cada BUSCAR. Respetar política de uso público.
@@ -59,3 +62,15 @@ Una vez que el MVP compile y se pruebe, sumar servicio de ubicación en primer p
 - Los números son **estimaciones geométricas**, no velocidades ni garantía de condiciones del camino.
 
 Validación local: 672 verificaciones del motor de navegación y 423 de presentación de notas. La compilación Android se realiza en CI y debe estar exitosa antes de instalar.
+
+
+## Cambios v0.2.3 — búsqueda local y perspectiva de conducción
+
+- Búsqueda manual de calles y alturas contextualizada por la **localidad GPS**, no por el primer resultado global: Nominatim reverse solo al buscar, con localidad en caché efímera.
+- Orden por cercanía, filtro de coincidencias locales fuera de radio, elección **explícita** entre alternativas; se indica claramente cuando la altura no está mapeada y el punto es aproximado. Si no aparece, añadir ciudad y provincia o marcar el punto en el mapa.
+- Consultas públicas con User-Agent identificable y separación >1 segundo. Sin autocompletado masivo, conforme a la política del proveedor. Cobertura de altura depende de OpenStreetMap.
+- Vista **3D de navegación**, no realidad aumentada ni cámara real: zoom cercano, inclinación 60°, rumbo de la ruta hacia adelante y centro adelantado para ver camino delante del vehículo. Demo y GPS usan la misma cámara; 2D vuelve a norte-arriba.
+- Verificaciones CLI añadidas para rumbo, giros que cruzan 0/360°, distancia de adelantamiento, tramo final y modo 2D. Tests JUnit con `DrivingCameraTest`.
+- Corrección adicional: los marcadores de destino deben elegirse, evitando mandar la ruta por defecto a otra ciudad.
+
+**Importante:** prueba de UI en Motorola pendiente; la búsqueda online no garantiza ubicación exacta de todos los domicilios y el rumbo de ruta es una aproximación geométrica, no detección visual de la calzada.

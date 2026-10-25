@@ -14,6 +14,9 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.speech.tts.TextToSpeech
+import android.speech.tts.Voice
+import android.media.AudioAttributes
+import android.os.SystemClock
 import android.view.Gravity
 import android.view.View
 import android.widget.*
@@ -56,6 +59,11 @@ class MainActivity : Activity(), LocationListener {
     private lateinit var locationManager: LocationManager
     private var navigating = false
     private var demo = false
+    private var routeDestination: GeoPoint? = null
+    private var pendingStops = listOf<GeoPoint>()
+    private val reroutePolicy = ReroutePolicy()
+    private var navigationSession = 0L
+    private var voiceEngineSettingsOpened = false
     private var map3d = true
     private val drivingCamera = DrivingCamera()
     private var followRouteCamera = true
@@ -141,17 +149,16 @@ class MainActivity : Activity(), LocationListener {
                 CameraPosition.Builder().target(LatLng(-40.0, -64.0)).zoom(3.7).build()
             ))
         }
-        tts = TextToSpeech(this) { code ->
-            speakReady = code == TextToSpeech.SUCCESS
-            if (speakReady) {
-                val result = tts?.setLanguage(Locale("es", "AR")) ?: TextToSpeech.LANG_NOT_SUPPORTED
-                if (result < 0) tts?.language = Locale("es", "ES")
-                tts?.setSpeechRate(1.08f)
-            }
-        }
+        initializeVoiceEngine()
         val saved = prefs.getString("last_route", null)
         if (!saved.isNullOrBlank()) execute("Recuperando ruta", { PaceNoteEngine.createPlan(RouteStore.deserialize(saved)) }) { prepared ->
             setPreparedPlan(prepared as RoutePlan, false)
+            // Recover destination only for actual road routes, never arbitrary imported GPX tracks.
+            val endpoint = prefs.getString("last_road_destination", null)
+            routeDestination = endpoint?.let { runCatching { RouteStore.deserialize(it).firstOrNull() }.getOrNull() }
+            pendingStops = prefs.getString("last_road_stops", null)?.let {
+                runCatching { RouteStore.deserialize(it) }.getOrDefault(emptyList())
+            } ?: emptyList()
         }
         requestGps()
     }
@@ -401,6 +408,8 @@ class MainActivity : Activity(), LocationListener {
     }
     private fun mainAction() {
         if (navigating || demo) {
+            navigationSession++
+            reroutePolicy.reset()
             navigating = false; demo = false; tts?.stop(); lastSpoken = -1
             showDrivingControls(true)
             action.text = "INICIAR GPS"; nextButton.text = "DEMO"
@@ -417,14 +426,24 @@ class MainActivity : Activity(), LocationListener {
             PaceNoteEngine.createPlan(RouteServices.route(origin, stops, destination))
         }) { result ->
             setPreparedPlan(result as RoutePlan, true)
+            routeDestination = destination
+            pendingStops = stops
+            prefs.edit()
+                .putString("last_road_destination", RouteStore.serialize(listOf(destination)))
+                .putString("last_road_stops", RouteStore.serialize(stops)).apply()
             target = null
-            status("Ruta calculada. Revisá las notas antes de salir.", false)
+            status("Ruta calculada. Si te desviás, intentará recalcular con internet.", false)
         }
     }
     private fun setPlan(points: List<GeoPoint>, save: Boolean) =
         setPreparedPlan(PaceNoteEngine.createPlan(points), save)
 
     private fun setPreparedPlan(parsed: RoutePlan, save: Boolean) {
+        navigationSession++
+        reroutePolicy.reset()
+        routeDestination = null
+        pendingStops = emptyList()
+        if (save) prefs.edit().remove("last_road_destination").remove("last_road_stops").apply()
         plan = parsed; navigator = NavigationEngine(parsed) { warnFactor }; drivingCamera.reset()
         positionIndex = 0; lastSpoken = -1; currentNote = 0
         navigating = false; demo = false; demoPosition = 0.0
@@ -442,6 +461,8 @@ class MainActivity : Activity(), LocationListener {
 
     private fun startGpsNavigation() {
         if (gps == null) { requestGps(); status("Esperando GPS", true); return }
+        navigationSession++
+        reroutePolicy.reset()
         navigating = true; demo = false; positionIndex = 0; lastSpoken = -1; currentNote = 0
         navigator?.reset(); drivingCamera.reset(); followRouteCamera = true; showDrivingControls(false)
         action.text = "FINALIZAR"; nextButton.text = "DEMO"
@@ -458,6 +479,8 @@ class MainActivity : Activity(), LocationListener {
             setPlan(PaceNotes.synthetic(center), false)
             status("RUTA SIMULADA: no corresponde a calles reales", false)
         }
+        navigationSession++
+        reroutePolicy.reset()
         demo = true; navigating = false; demoPosition = 0.0; positionIndex=0; lastSpoken=-1
         navigator?.reset(); drivingCamera.reset(); followRouteCamera = true; showDrivingControls(false)
         action.text = "FINALIZAR"; nextButton.text="PAUSA"
@@ -482,10 +505,19 @@ class MainActivity : Activity(), LocationListener {
         val route = plan ?: return
         if (!navigating && !demo) return
         val result = navigator?.update(point, speed, if(demo) 3f else lastLocation?.accuracy ?: 5f) ?: return
+        val now = SystemClock.elapsedRealtime()
+        val accuracy = if (demo) 3f else lastLocation?.accuracy ?: 10f
         if (result.offRoute) {
-            status("GPS impreciso o fuera de ruta: no se cantan curvas", true)
+            if (navigating && !demo && routeDestination != null &&
+                reroutePolicy.observe(true, result.fix.errorM, accuracy, now)) {
+                recalculateFrom(point, result.fix.metres)
+            }
+            status(if (reroutePolicy.isBusy()) "Recalculando desde tu posición…" else
+                if (routeDestination == null) "Fuera del trazado GPX: volvé a la ruta; recálculo no disponible" else
+                    "Fuera de ruta: comprobando GPS para recalcular", true)
             return
         }
+        reroutePolicy.observe(false, result.fix.errorM, accuracy, now)
         positionIndex = result.fix.segment.coerceIn(0, route.points.lastIndex)
         val remaining = (route.totalMetres-result.fix.metres).coerceAtLeast(0.0)
         info.text = "${(speed*3.6).toInt().coerceAtLeast(0)} km/h  •  ${"%.1f".format(Locale.US,remaining/1000)} km restantes"
@@ -501,12 +533,143 @@ class MainActivity : Activity(), LocationListener {
             say(message)
         }
         if (result.arrived) {
+            navigationSession++
+            reroutePolicy.reset()
             navigating = false; demo = false; action.text = "INICIAR GPS"
             showDrivingControls(true)
         }
     }
+    private fun recalculateFrom(current: GeoPoint, progressMetres: Double) {
+        val destination = routeDestination ?: run { reroutePolicy.completeAttempt(); return }
+        val oldPlan = plan ?: run { reroutePolicy.completeAttempt(); return }
+        val session = navigationSession
+        // Preserve stops that are ahead on the ORIGINAL route, not ones already passed.
+        val stopsAhead = pendingStops.filter { stop ->
+            // The navigator intentionally searches only ~650 m ahead. Stops could be
+            // kilometres away, so inspect the original polyline rather than its local window.
+            val closestIndex = oldPlan.points.indices.minByOrNull { i ->
+                DrivingCamera.distance(oldPlan.points[i], stop)
+            } ?: -1
+            closestIndex >= 0 && oldPlan.metresAtPoint[closestIndex] > progressMetres + 30.0
+        }
+        status("Recalculando recorrido desde tu GPS…", false)
+        thread {
+            try {
+                val updated = PaceNoteEngine.createPlan(RouteServices.route(current, stopsAhead, destination))
+                runOnUiThread {
+                    if (session == navigationSession && navigating && !demo && routeDestination == destination && plan === oldPlan) {
+                        plan = updated
+                        navigator = NavigationEngine(updated) { warnFactor }
+                        drivingCamera.reset()
+                        lastSpoken = -1
+                        pendingStops = stopsAhead
+                        prefs.edit()
+                            .putString("last_route", RouteStore.serialize(updated.points))
+                            .putString("last_road_stops", RouteStore.serialize(stopsAhead)).apply()
+                        drawPlan()
+                        updateProgress(current, lastLocation?.speed ?: 0f)
+                        status("Nueva ruta calculada · notas actualizadas", false)
+                        say("Ruta recalculada. Nuevas notas disponibles.")
+                    }
+                    reroutePolicy.completeAttempt()
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    if (session == navigationSession && navigating) {
+                        status("No pude recalcular sin conexión. Se conserva el recorrido anterior.", true)
+                    }
+                    reroutePolicy.completeAttempt()
+                }
+            }
+        }
+    }
+
+    private fun initializeVoiceEngine() {
+        speakReady = false
+        tts?.stop()
+        tts?.shutdown()
+        tts = TextToSpeech(this) { result ->
+            runOnUiThread {
+                if (result != TextToSpeech.SUCCESS) {
+                    speakReady = false
+                    return@runOnUiThread
+                }
+                speakReady = true
+                val engine = tts ?: return@runOnUiThread
+                val language = engine.setLanguage(Locale("es", "AR"))
+                if (language < TextToSpeech.LANG_AVAILABLE) engine.language = Locale("es", "ES")
+                engine.setAudioAttributes(AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+                applyVoicePreferences()
+            }
+        }
+    }
+
+    private fun availableSpanishVoices(): List<Voice> = tts?.voices.orEmpty()
+        .filter { it.locale.language == "es" && !it.isNetworkConnectionRequired }
+        .sortedWith(compareBy<Voice> { if (it.locale.country == "AR") 0 else if (it.locale.country == "MX") 1 else 2 }
+            .thenBy { it.name })
+
+    private fun applyVoicePreferences() {
+        val engine = tts ?: return
+        val savedVoice = prefs.getString("voice_name", null)
+        availableSpanishVoices().firstOrNull { it.name == savedVoice }?.let { engine.setVoice(it) }
+        engine.setSpeechRate(prefs.getFloat("voice_speed", 1.15f))
+        engine.setPitch(prefs.getFloat("voice_pitch", 0.96f))
+    }
+
+    private fun chooseVoice() {
+        if (!speakReady) {
+            status("Motor de voz iniciándose. Revisá los ajustes TTS del teléfono.", true)
+            return
+        }
+        val options = availableSpanishVoices()
+        if (options.isEmpty()) {
+            android.app.AlertDialog.Builder(this).setTitle("VOCES EN ESPAÑOL")
+                .setMessage("No hay voces españolas sin conexión instaladas en el motor actual. Instalá voces desde Android, RHVoice o SherpaTTS y elegí ese motor en el sistema.")
+                .setPositiveButton("AJUSTES DEL TELÉFONO") { _, _ -> openTtsSettings() }
+                .setNegativeButton("CERRAR",null).show()
+            return
+        }
+        val labels = options.map { "${it.locale.getDisplayName(Locale("es", "AR"))} · ${it.name}" }.toTypedArray()
+        android.app.AlertDialog.Builder(this).setTitle("VOCES DESCARGADAS")
+            .setSingleChoiceItems(labels, options.indexOfFirst { it.name == tts?.voice?.name }) { dialog, index ->
+                val selected = options[index]
+                if (tts?.setVoice(selected) == TextToSpeech.SUCCESS) {
+                    prefs.edit().putString("voice_name", selected.name).apply()
+                    say("En cien metros, derecha cinco larga, enlaza izquierda tres.")
+                }
+                dialog.dismiss()
+            }.setNeutralButton("MÁS VOCES") { _, _ -> openTtsSettings() }
+            .setNegativeButton("CERRAR", null).show()
+    }
+
+    private fun openTtsSettings() {
+        try {
+            voiceEngineSettingsOpened = true
+            startActivity(Intent("com.android.settings.TTS_SETTINGS"))
+        } catch (_: Exception) {
+            voiceEngineSettingsOpened = false
+            status("Abrí Ajustes > Accesibilidad > Salida de texto a voz para descargar voces", true)
+        }
+    }
+
+    private fun adjustVoice() {
+        val choices = arrayOf("Normal", "Copiloto rápido", "Copiloto intenso", "Copiloto pausado")
+        val presets = listOf(1.0f to 1.0f, 1.19f to 0.97f, 1.31f to 0.9f, 0.86f to 1.03f)
+        android.app.AlertDialog.Builder(this).setTitle("ESTILO DE COPILOTO")
+            .setItems(choices) { _, index ->
+                val (speed, pitch) = presets[index]
+                prefs.edit().putFloat("voice_speed",speed).putFloat("voice_pitch",pitch).apply()
+                applyVoicePreferences()
+                say("En doscientos metros, derecha cuatro, se cierra a dos.")
+            }.setNegativeButton("CERRAR",null).show()
+    }
+
     private fun say(text: String) {
-        if (voiceOn && speakReady) tts?.speak(text, TextToSpeech.QUEUE_ADD, null, "rally_${System.nanoTime()}")
+        // Do not accumulate stale announcements when bends follow one another.
+        if (voiceOn && speakReady) tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "rally_${System.nanoTime()}")
     }
 
     private fun drawPlan() {
@@ -712,11 +875,15 @@ class MainActivity : Activity(), LocationListener {
     }
 
     private fun showSettings() {
-        val names=arrayOf("Aviso corto (4 s)","Aviso normal (7 s)","Aviso anticipado (10 s)","Volver a escuchar una nota", "Mostrar notas completas")
+        val names=arrayOf("Aviso corto (4 s)","Aviso normal (7 s)","Aviso anticipado (10 s)",
+            "Volver a escuchar una nota", "Mostrar notas completas", "Elegir voz en español", "Estilo y velocidad de voz", "Instalar o cambiar motor TTS")
         android.app.AlertDialog.Builder(this).setTitle("COPILOTO · AJUSTES")
             .setItems(names) { _, i ->
                 if(i in 0..2) { warnFactor=i; prefs.edit().putInt("anticipation",i).apply();status("Anticipación: ${names[i]}",false) }
                 if(i==3) plan?.notes?.getOrNull(lastSpoken)?.let { say(PaceNotes.phrase(it,plan?.notes?.getOrNull(lastSpoken+1))) }
+                if (i==5) chooseVoice()
+                if (i==6) adjustVoice()
+                if (i==7) openTtsSettings()
                 if(i==4) {
                     val text=plan?.notes?.mapIndexed { j,n -> "${j+1}. ${n.metresFromStart.toInt()} m: ${PaceNotes.phrase(n)}" }?.joinToString("\n")
                         ?: "Todavía no hay un recorrido"
@@ -726,7 +893,13 @@ class MainActivity : Activity(), LocationListener {
             }.setNegativeButton("CERRAR",null).show()
     }
     override fun onStart() { super.onStart();mapView.onStart() }
-    override fun onResume() { super.onResume();mapView.onResume() }
+    override fun onResume() {
+        super.onResume(); mapView.onResume()
+        if (voiceEngineSettingsOpened) {
+            voiceEngineSettingsOpened = false
+            initializeVoiceEngine()
+        }
+    }
     override fun onPause() { mapView.onPause();super.onPause() }
     override fun onStop() { mapView.onStop();super.onStop() }
     override fun onLowMemory() { super.onLowMemory();mapView.onLowMemory() }
