@@ -1,6 +1,7 @@
 name: APK Android (Rally GPS AI)
 on:
   workflow_dispatch:
+  pull_request:
   push:
     branches: [main]
     paths-ignore: ['README.md']
