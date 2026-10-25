@@ -14,6 +14,10 @@ data class PaceNote(
     val grade: Int,
     val cumulativeTurnDegrees: Int,
     val approximateRadiusM: Double,
+    val endMetres: Double = metresFromStart,
+    val tightensTo: Int? = null,
+    val opensTo: Int? = null,
+    val confidence: Double = 0.65,
 ) {
     enum class Side { LEFT, RIGHT }
     val title: String get() = "${if (side == Side.LEFT) "Izquierda" else "Derecha"} $grade"
@@ -29,8 +33,8 @@ data class RoutePlan(
 
 object PaceNoteEngine {
     private const val EARTH = 6371000.0
-    private const val SAMPLE_M = 10.0
-    private const val WINDOW = 2
+    private const val SAMPLE_M = 5.0
+    private const val WINDOW = 3
 
     fun createPlan(route: List<GeoPoint>): RoutePlan {
         require(route.size >= 2) { "Se requieren al menos dos puntos para una ruta" }
@@ -52,7 +56,7 @@ object PaceNoteEngine {
             if (acc.isEmpty() || acc.last().distance(p) >= 0.25) acc.add(p)
             acc
         }
-        if (raw.size < 2) return RoutePlan(route, listOf(0.0, 0.0), emptyList())
+        if (raw.size < 2) return RoutePlan(listOf(route.first(), route.last()), listOf(0.0, 0.0), emptyList())
         val rawDistances = DoubleArray(raw.size)
         for (j in 1 until raw.size) rawDistances[j] = rawDistances[j-1] + raw[j-1].distance(raw[j])
         val total = rawDistances.last()
@@ -87,9 +91,22 @@ object PaceNoteEngine {
             val h2 = atan2(c.y - b.y, c.x - b.x)
             val delta = wrap(h2 - h1)
             // Cambio de rumbo en ~60 m. El radio es únicamente una aproximación geométrica.
-            if (abs(delta) < Math.toRadians(6.0)) continue
+            if (abs(delta) < Math.toRadians(5.0)) continue
             curvature[i] = abs(delta)
             turnSign[i] = if (delta > 0.0) 1 else -1
+        }
+        fun grade(radius: Double) = when {
+            radius < 22.0 -> 1
+            radius < 40.0 -> 2
+            radius < 65.0 -> 3
+            radius < 100.0 -> 4
+            radius < 165.0 -> 5
+            else -> 6
+        }
+        fun radiusAt(k: Int): Double {
+            val left = (k - WINDOW).coerceAtLeast(0)
+            val right = (k + WINDOW).coerceAtMost(chain.lastIndex)
+            return ((chain[right] - chain[left]) / (2.0*curvature[k].coerceAtLeast(0.01))).coerceAtLeast(1.0)
         }
         val detected = mutableListOf<PaceNote>()
         var i = WINDOW
@@ -116,16 +133,19 @@ object PaceNoteEngine {
             val arc = chain[(peak + WINDOW).coerceAtMost(chain.lastIndex)] -
                 chain[(peak - WINDOW).coerceAtLeast(0)]
             val radius = (arc / (2.0 * curvature[peak])).coerceAtLeast(1.0)
-            val grade = when {
-                radius < 22.0 -> 1
-                radius < 40.0 -> 2
-                radius < 65.0 -> 3
-                radius < 100.0 -> 4
-                radius < 165.0 -> 5
-                else -> 6
-            }
+            val mainGrade = grade(radius)
+            // Only call a changing radius when the curve contains enough samples to support it.
+            val endMetres = chain[(end + WINDOW).coerceAtMost(chain.lastIndex)]
+            val mid = (start + end) / 2
+            val early = (start + mid) / 2
+            val late = (mid + end) / 2
+            val earlyGrade = grade(radiusAt(early))
+            val lateGrade = grade(radiusAt(late))
+            val tightensTo = if (end-start >= 10 && lateGrade + 1 < earlyGrade) lateGrade else null
+            val opensTo = if (end-start >= 10 && earlyGrade + 1 < lateGrade) lateGrade else null
+            val quality = if (end-start >= 5 && turn >= 30.0) 0.8 else 0.55
             detected.add(PaceNote(chain[start], if (sign > 0) PaceNote.Side.LEFT else PaceNote.Side.RIGHT,
-                grade, turn.roundToInt(), radius))
+                mainGrade, turn.roundToInt(), radius, endMetres, tightensTo, opensTo, quality))
         }
         // Un mismo arco no debe generar múltiples notas repetidas.
         val notes = mutableListOf<PaceNote>()
@@ -134,7 +154,8 @@ object PaceNoteEngine {
             if (prev != null && n.metresFromStart - prev.metresFromStart < 45.0 && prev.side == n.side) {
                 if (n.grade < prev.grade) notes[notes.lastIndex] = prev.copy(grade = n.grade,
                     cumulativeTurnDegrees = max(prev.cumulativeTurnDegrees, n.cumulativeTurnDegrees),
-                    approximateRadiusM = min(prev.approximateRadiusM, n.approximateRadiusM))
+                    approximateRadiusM = min(prev.approximateRadiusM, n.approximateRadiusM),
+                    endMetres = max(prev.endMetres, n.endMetres))
             } else notes.add(n)
         }
         return RoutePlan(smooth.map(::unproject), chain, notes)
