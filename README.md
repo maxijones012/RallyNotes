@@ -1,6 +1,6 @@
 # Rally GPS AI 🏁
 
-Aplicación Android **nueva e independiente**, inspirada en funciones de Sideways y Rally SatNav. No contiene código, recursos visuales ni audios propietarios de esas aplicaciones. Paquete: `ar.com.rallygpsai`. **Estado: etapas 1–8, versión experimental 0.2.0.**
+Aplicación Android **nueva e independiente**, inspirada en funciones de Sideways y Rally SatNav. No contiene código, recursos visuales ni audios propietarios de esas aplicaciones. Paquete: `ar.com.rallygpsai`. **Estado: etapas 1–8, versión experimental 0.2.1.**
 
 ## Incluido en esta entrega
 
@@ -48,3 +48,14 @@ Opcional: PUNTOS → elegir origen o paradas en el mapa → BUSCAR destino → T
 ## Qué sigue
 
 Una vez que el MVP compile y se pruebe, sumar servicio de ubicación en primer plano, descarga offline legal, indicaciones convencionales de giros/semáforos, rutas con paradas, pantalla de revisión/edición de notas, GPX con metadatos, marcadores de confianza, pruebas de terreno de calibración 1–6 y reemplazo del servidor demo.
+
+## Interfaz de notas v0.2.1
+
+- Tarjetas rectangulares con pictograma dibujado de izquierda/derecha + número 1–6; color diferente por dificultad.
+- Distancia grande `EN 120 M` o `AHORA`, sin mostrar distancias negativas.
+- Segunda tarjeta `ENLAZA` únicamente si la siguiente curva está a 85 m o menos del final de la actual.
+- Indicadores de `LARGA`, `CIERRA A`, `ABRE A` cuando la geometría estimada los respalda.
+- Separación real entre botones, tamaños mínimos táctiles y mayor respeto de barras del sistema.
+- Los números son **estimaciones geométricas**, no velocidades ni garantía de condiciones del camino.
+
+Validación local: 672 verificaciones del motor de navegación y 423 de presentación de notas. La compilación Android se realiza en CI y debe estar exitosa antes de instalar.
