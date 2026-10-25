@@ -77,6 +77,7 @@ class MainActivity : Activity(), LocationListener {
     private var demoSpeed = 55.0 / 3.6
     private var speakReady = false
     private var tts: TextToSpeech? = null
+    private val rallyAudio by lazy { RallyAudioPlayer(this) }
     private val ui = Handler(Looper.getMainLooper())
     private lateinit var searchInput: EditText
     private lateinit var banner: TextView
@@ -255,7 +256,7 @@ class MainActivity : Activity(), LocationListener {
             voiceButton = button(if (voiceOn) "VOZ ✓" else "MUDO", panel, sky).also { it.setOnClickListener {
                 voiceOn = !voiceOn; prefs.edit().putBoolean("voice", voiceOn).apply()
                 it as TextView; it.text = if (voiceOn) "VOZ ✓" else "MUDO"
-                if (!voiceOn) tts?.stop()
+                if (!voiceOn) { tts?.stop(); rallyAudio.stop() }
             } }
             add(voiceButton, dp(78), dp(48))
         })
@@ -410,7 +411,7 @@ class MainActivity : Activity(), LocationListener {
         if (navigating || demo) {
             navigationSession++
             reroutePolicy.reset()
-            navigating = false; demo = false; tts?.stop(); lastSpoken = -1
+            navigating = false; demo = false; tts?.stop(); rallyAudio.stop(); lastSpoken = -1
             showDrivingControls(true)
             action.text = "INICIAR GPS"; nextButton.text = "DEMO"
             resetNoteCard("#F0475A", "STOP", "NAVEGACIÓN DETENIDA", "Podés retomar el recorrido o trazar uno nuevo")
@@ -529,8 +530,14 @@ class MainActivity : Activity(), LocationListener {
             updateNoteCard(next, follow, result.distanceToNoteM)
         }
         result.announcement?.let { message ->
-            if (result.noteIndex >= 0 && !result.arrived) lastSpoken = result.noteIndex
-            say(message)
+            if (result.noteIndex >= 0 && !result.arrived) {
+                lastSpoken = result.noteIndex
+                val spokenNote = route.notes.getOrNull(result.noteIndex)
+                if (spokenNote != null) {
+                    speakRallyNote(spokenNote, route.notes.getOrNull(result.noteIndex+1),
+                        result.distanceToNoteM)
+                } else say(message)
+            } else say(message)
         }
         if (result.arrived) {
             navigationSession++
@@ -667,8 +674,52 @@ class MainActivity : Activity(), LocationListener {
             }.setNegativeButton("CERRAR",null).show()
     }
 
+    private fun speakRallyNote(note: PaceNote, next: PaceNote?, distance: Double) {
+        if (!voiceOn) return
+        val mode = prefs.getString("rally_voice_mode", RallyVoicePack.SYSTEM) ?: RallyVoicePack.SYSTEM
+        val phrase = PaceNotes.phrase(note, next)
+        val prefix = if (distance <= 22.0) "Ahora, " else
+            "En ${((distance / 10.0).roundToInt() * 10).coerceIn(20, 400)} metros, "
+        if (mode != RallyVoicePack.SYSTEM) {
+            tts?.stop()
+            if (rallyAudio.play(mode, RallyVoicePack.tokens(note, next, distance))) return
+            status("Pack de voz no disponible; utilizando voz Android", true)
+        }
+        say(prefix + phrase)
+    }
+
+    private fun selectRallyVoiceMode() {
+        val choices = arrayOf("Voz Android (TTS)", "CarlFM · claro · offline", "CarlFM · radio de rally · offline")
+        val modes = RallyVoicePack.modes
+        val saved = prefs.getString("rally_voice_mode", RallyVoicePack.SYSTEM) ?: RallyVoicePack.SYSTEM
+        android.app.AlertDialog.Builder(this).setTitle("VOCES DE COPILOTO")
+            .setSingleChoiceItems(choices, modes.indexOf(saved).coerceAtLeast(0)) { dialog, position ->
+                val mode = modes[position]
+                if (mode != RallyVoicePack.SYSTEM && !rallyAudio.available(mode)) {
+                    status("Pack CarlFM no disponible en esta APK. Usá TTS Android.", true)
+                } else {
+                    tts?.stop(); rallyAudio.stop()
+                    prefs.edit().putString("rally_voice_mode", mode).apply()
+                    status("Copiloto: ${choices[position]}", false)
+                    previewRallyVoice()
+                }
+                dialog.dismiss()
+            }.setNeutralButton("LICENCIAS") { _, _ ->
+                android.app.AlertDialog.Builder(this).setTitle("LICENCIAS DEL PACK")
+                    .setMessage("CarlFM (es_ES, x_low): catálogo MIT de Piper Voices. Datos declarados como dominio público; modelo entrenado desde cero. Audio generado exclusivamente para Rally GPS AI. No incluye voces de DiRT Rally ni Sideways. Fuente: huggingface.co/rhasspy/piper-voices")
+                    .setPositiveButton("CERRAR", null).show()
+            }.setNegativeButton("CERRAR", null).show()
+    }
+
+    private fun previewRallyVoice() {
+        val sample = PaceNote(100.0, PaceNote.Side.RIGHT, 5, 85, 100.0, 200.0)
+        val next = PaceNote(245.0, PaceNote.Side.LEFT, 3, 55, 60.0, 300.0)
+        speakRallyNote(sample, next, 100.0)
+    }
+
     private fun say(text: String) {
-        // Do not accumulate stale announcements when bends follow one another.
+        // Prevent any outdated phrase continuing after a reroute or a new announcement.
+        rallyAudio.stop()
         if (voiceOn && speakReady) tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "rally_${System.nanoTime()}")
     }
 
@@ -876,14 +927,21 @@ class MainActivity : Activity(), LocationListener {
 
     private fun showSettings() {
         val names=arrayOf("Aviso corto (4 s)","Aviso normal (7 s)","Aviso anticipado (10 s)",
-            "Volver a escuchar una nota", "Mostrar notas completas", "Elegir voz en español", "Estilo y velocidad de voz", "Instalar o cambiar motor TTS")
+            "Volver a escuchar una nota", "Mostrar notas completas", "Elegir voz de copiloto", "Probar voz de rally", "Elegir voz TTS Android", "Velocidad y tono TTS", "Instalar/cambiar motor TTS", "Licencias de voz")
         android.app.AlertDialog.Builder(this).setTitle("COPILOTO · AJUSTES")
             .setItems(names) { _, i ->
                 if(i in 0..2) { warnFactor=i; prefs.edit().putInt("anticipation",i).apply();status("Anticipación: ${names[i]}",false) }
-                if(i==3) plan?.notes?.getOrNull(lastSpoken)?.let { say(PaceNotes.phrase(it,plan?.notes?.getOrNull(lastSpoken+1))) }
-                if (i==5) chooseVoice()
-                if (i==6) adjustVoice()
-                if (i==7) openTtsSettings()
+                if(i==3) plan?.notes?.getOrNull(lastSpoken)?.let {
+                    speakRallyNote(it, plan?.notes?.getOrNull(lastSpoken+1), 50.0)
+                }
+                if (i==5) selectRallyVoiceMode()
+                if (i==6) previewRallyVoice()
+                if (i==7) chooseVoice()
+                if (i==8) adjustVoice()
+                if (i==9) openTtsSettings()
+                if (i==10) android.app.AlertDialog.Builder(this).setTitle("LICENCIAS")
+                    .setMessage("CarlFM (es-ES) · rhasspy/piper-voices · MIT. Dataset: dominio público. El modelo y el sintetizador no están incluidos, solo audios OGG. Más datos en github.com/maxijones012/RallyNotes/blob/main/docs/VOICE_LICENSES.md")
+                    .setPositiveButton("CERRAR",null).show()
                 if(i==4) {
                     val text=plan?.notes?.mapIndexed { j,n -> "${j+1}. ${n.metresFromStart.toInt()} m: ${PaceNotes.phrase(n)}" }?.joinToString("\n")
                         ?: "Todavía no hay un recorrido"
@@ -907,6 +965,7 @@ class MainActivity : Activity(), LocationListener {
     override fun onDestroy() {
         demo=false; navigating=false; ui.removeCallbacksAndMessages(null)
         locationManager.removeUpdates(this)
+        rallyAudio.stop()
         tts?.stop();tts?.shutdown()
         mapView.onDestroy();super.onDestroy()
     }
