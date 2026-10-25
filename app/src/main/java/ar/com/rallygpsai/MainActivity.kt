@@ -25,6 +25,7 @@ import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.Style
 import org.maplibre.android.style.layers.CircleLayer
+import org.maplibre.android.style.layers.SymbolLayer
 import org.maplibre.android.style.layers.LineLayer
 import org.maplibre.android.style.layers.PropertyFactory.*
 import org.maplibre.android.style.expressions.Expression
@@ -47,6 +48,11 @@ class MainActivity : Activity(), LocationListener {
     private var gps: GeoPoint? = null
     private var lastLocation: Location? = null
     private var target: GeoPoint? = null
+    private var chosenOrigin: GeoPoint? = null
+    private val intermediatePoints = mutableListOf<GeoPoint>()
+    private var mapSelectMode = 0 // 0 destino, 1 origen, 2 parada
+    private var navigator: NavigationEngine? = null
+    private var controlsVisible = false
     private lateinit var locationManager: LocationManager
     private var navigating = false
     private var demo = false
@@ -67,6 +73,8 @@ class MainActivity : Activity(), LocationListener {
     private lateinit var noteTitle: TextView
     private lateinit var noteDetail: TextView
     private lateinit var info: TextView
+    private lateinit var searchRow: LinearLayout
+    private lateinit var toolsRow: LinearLayout
     private lateinit var action: TextView
     private lateinit var gpsButton: TextView
     private lateinit var modeButton: TextView
@@ -97,12 +105,28 @@ class MainActivity : Activity(), LocationListener {
             loaded.uiSettings.isCompassEnabled = true
             loaded.setStyle(Style.Builder().fromUri("https://tiles.openfreemap.org/styles/dark")) {
                 drawPlan()
+                drawWaypoints()
                 drawLocation()
             }
             loaded.addOnMapLongClickListener { latlng ->
-                target = GeoPoint(latlng.latitude, latlng.longitude)
-                status("Destino señalado. Tocá 'TRAZAR RUTA'", false)
+                val point = GeoPoint(latlng.latitude, latlng.longitude)
+                when (mapSelectMode) {
+                    1 -> { chosenOrigin = point; status("Origen elegido manualmente", false) }
+                    2 -> {
+                        if (intermediatePoints.size < 4) {
+                            intermediatePoints.add(point)
+                            status("Parada ${intermediatePoints.size} agregada", false)
+                        } else status("Máximo de cuatro paradas", true)
+                    }
+                    else -> { target = point; status("Destino señalado. Tocá TRAZAR RUTA", false) }
+                }
+                mapSelectMode = 0
+                drawWaypoints()
                 true
+            }
+            loaded.addOnMapClickListener {
+                if (navigating || demo) showDrivingControls(!controlsVisible)
+                false
             }
             loaded.moveCamera(CameraUpdateFactory.newCameraPosition(
                 CameraPosition.Builder().target(LatLng(-40.0, -64.0)).zoom(3.7).build()
@@ -117,7 +141,9 @@ class MainActivity : Activity(), LocationListener {
             }
         }
         val saved = prefs.getString("last_route", null)
-        if (!saved.isNullOrBlank()) runCatching { setPlan(RouteStore.deserialize(saved), false) }
+        if (!saved.isNullOrBlank()) execute("Recuperando ruta", { PaceNoteEngine.createPlan(RouteStore.deserialize(saved)) }) { prepared ->
+            setPreparedPlan(prepared as RoutePlan, false)
+        }
         requestGps()
     }
 
@@ -174,7 +200,7 @@ class MainActivity : Activity(), LocationListener {
             } }
             add(voiceButton, dp(75))
         })
-        val searchRow = row(6) {
+        searchRow = row(6) {
             searchInput = EditText(this@MainActivity).apply {
                 hint = "Destino: localidad, calle o dirección"; setHintTextColor(Color.parseColor("#758A9F"))
                 setTextColor(Color.WHITE); textSize = 14f; isSingleLine = true
@@ -218,11 +244,13 @@ class MainActivity : Activity(), LocationListener {
             gpsButton = button("◎ GPS", panel, sky).also { it.setOnClickListener { centerGps() } }
             add(gpsButton, dp(73), dp(49))
         })
-        bottom.add(row(7) {
-            add(button("IMPORTAR GPX").apply { setOnClickListener { importGpx() } }, 0,dp(43),1f)
-            add(button("EXPORTAR GPX").apply { setOnClickListener { exportGpx() } }, 0,dp(43),1f)
+        toolsRow = row(5) {
+            add(button("PUNTOS").apply { setOnClickListener { showPointOptions() } }, 0,dp(43),1f)
+            add(button("GPX ↓").apply { setOnClickListener { importGpx() } }, 0,dp(43),1f)
+            add(button("GPX ↑").apply { setOnClickListener { exportGpx() } }, 0,dp(43),1f)
             add(button("AJUSTES").apply { setOnClickListener { showSettings() } },0,dp(43),1f)
-        })
+        }
+        bottom.add(toolsRow)
         root.addView(bottom, FrameLayout.LayoutParams(-1,-2,Gravity.BOTTOM).apply { setMargins(dp(9),0,dp(9),dp(11)) })
         setContentView(root)
     }
@@ -249,6 +277,7 @@ class MainActivity : Activity(), LocationListener {
             target = result as? GeoPoint
             if (target == null) status("No encontré ese destino", true)
             else {
+                drawWaypoints()
                 map?.animateCamera(CameraUpdateFactory.newLatLngZoom(LatLng(target!!.latitude, target!!.longitude), 13.0))
                 status("Destino elegido: ${name.take(38)} · tocá TRAZAR RUTA", false)
             }
@@ -257,6 +286,7 @@ class MainActivity : Activity(), LocationListener {
     private fun mainAction() {
         if (navigating || demo) {
             navigating = false; demo = false; tts?.stop(); lastSpoken = -1
+            showDrivingControls(true)
             action.text = "INICIAR GPS"; nextButton.text = "DEMO"
             noteTitle.text = "NAVEGACIÓN DETENIDA"
             status("Recorrido guardado. Podés retomarlo.", false)
@@ -264,24 +294,32 @@ class MainActivity : Activity(), LocationListener {
         }
         if (plan != null && target == null) { startGpsNavigation(); return }
         if (target == null) { status("Ingresá un destino o mantené pulsado el mapa", true); return }
-        val origin = gps ?: run { status("Necesito la ubicación GPS para trazar la ruta", true); requestGps(); return }
-        execute("Calculando la ruta (servidor demo)", { RouteServices.route(origin, target!!) }) { result ->
-            setPlan(result as List<GeoPoint>, true)
+        val origin = chosenOrigin ?: gps ?: run { status("Necesito GPS o un origen manual", true); requestGps(); return }
+        val destination = target ?: return
+        val stops = intermediatePoints.toList()
+        execute("Calculando ruta (servidor demo)", {
+            PaceNoteEngine.createPlan(RouteServices.route(origin, stops, destination))
+        }) { result ->
+            setPreparedPlan(result as RoutePlan, true)
             target = null
             status("Ruta calculada. Revisá las notas antes de salir.", false)
         }
     }
-    private fun setPlan(points: List<GeoPoint>, save: Boolean) {
-        val parsed = PaceNoteEngine.createPlan(points)
-        plan = parsed; positionIndex = 0; lastSpoken = -1; currentNote = 0
+    private fun setPlan(points: List<GeoPoint>, save: Boolean) =
+        setPreparedPlan(PaceNoteEngine.createPlan(points), save)
+
+    private fun setPreparedPlan(parsed: RoutePlan, save: Boolean) {
+        plan = parsed; navigator = NavigationEngine(parsed) { warnFactor }
+        positionIndex = 0; lastSpoken = -1; currentNote = 0
         navigating = false; demo = false; demoPosition = 0.0
         action.text = "INICIAR GPS"; nextButton.text = "DEMO"
+        showDrivingControls(false)
         val km = "%.1f".format(Locale.US, parsed.totalMetres / 1000.0)
         noteTitle.text = "${parsed.notes.size} NOTAS DETECTADAS"
         noteDetail.text = "${km} km · Revisá curvas y recorridos antes de iniciar"
         info.text = "$km KM  •  ${parsed.notes.size} CURVAS  •  1–6"
         drawPlan()
-        if (save && points.size <= 30000) prefs.edit().putString("last_route", RouteStore.serialize(points)).apply()
+        if (save && parsed.points.size <= 30000) prefs.edit().putString("last_route", RouteStore.serialize(parsed.points)).apply()
         val center = parsed.points[parsed.points.size/2]
         map?.animateCamera(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder()
             .target(LatLng(center.latitude, center.longitude)).zoom(12.7).tilt(0.0).build()), 600)
@@ -290,18 +328,20 @@ class MainActivity : Activity(), LocationListener {
     private fun startGpsNavigation() {
         if (gps == null) { requestGps(); status("Esperando GPS", true); return }
         navigating = true; demo = false; positionIndex = 0; lastSpoken = -1; currentNote = 0
+        navigator?.reset(); showDrivingControls(false)
         action.text = "FINALIZAR"; nextButton.text = "DEMO"
         status("GPS activo · notas estimadas del trazado · respetá la señalización", false)
         lastLocation?.let { updateProgress(GeoPoint(it.latitude,it.longitude), it.speed) }
     }
     private fun startDemo() {
-        if (demo) { demo=false; nextButton.text="DEMO"; action.text="INICIAR GPS"; return }
+        if (demo) { demo=false; nextButton.text="DEMO"; action.text="INICIAR GPS"; showDrivingControls(true); return }
         if (plan == null) {
             val center = gps ?: GeoPoint(-43.249, -65.309)
             setPlan(PaceNotes.synthetic(center), false)
             status("RUTA SIMULADA: no corresponde a calles reales", false)
         }
         demo = true; navigating = false; demoPosition = 0.0; positionIndex=0; lastSpoken=-1
+        navigator?.reset(); showDrivingControls(false)
         action.text = "FINALIZAR"; nextButton.text="PAUSA"
         val tick = object : Runnable {
             override fun run() {
@@ -313,7 +353,7 @@ class MainActivity : Activity(), LocationListener {
                 val point = p.points[index]
                 updateProgress(point, demoSpeed.toFloat())
                 drawPosition(point)
-                if (index >= p.points.lastIndex) { demo=false; action.text="INICIAR GPS"; nextButton.text="DEMO"; return }
+                if (index >= p.points.lastIndex) { demo=false; action.text="INICIAR GPS"; nextButton.text="DEMO"; showDrivingControls(true); return }
                 ui.postDelayed(this, 500)
             }
         }
@@ -323,37 +363,36 @@ class MainActivity : Activity(), LocationListener {
     private fun updateProgress(point: GeoPoint, speed: Float) {
         val route = plan ?: return
         if (!navigating && !demo) return
-        val (candidate, miss) = PaceNoteEngine.nearestProgress(route, point, positionIndex)
-        if (miss > 70) {
-            status("Fuera del recorrido (>70 m). No se cantan notas de curva.", true)
+        val result = navigator?.update(point, speed, if(demo) 3f else lastLocation?.accuracy ?: 5f) ?: return
+        if (result.offRoute) {
+            status("GPS impreciso o fuera de ruta: no se cantan curvas", true)
             return
         }
-        positionIndex = maxOf(positionIndex, candidate)
-        val progress = route.metresAtPoint[positionIndex]
-        val remaining = (route.totalMetres - progress).coerceAtLeast(0.0)
-        info.text = "${(speed*3.6).toInt()} km/h  •  ${"%.1f".format(Locale.US,remaining/1000)} km restantes"
-        val notes = route.notes
-        val nextIndex = notes.indexOfFirst { it.metresFromStart + 15 >= progress }
-        if (nextIndex < 0) {
-            noteTitle.text="FIN DE NOTAS"
-            noteDetail.text="Mantené la atención en el camino"
-            return
+        positionIndex = result.fix.segment.coerceIn(0, route.points.lastIndex)
+        val remaining = (route.totalMetres-result.fix.metres).coerceAtLeast(0.0)
+        info.text = "${(speed*3.6).toInt().coerceAtLeast(0)} km/h  •  ${"%.1f".format(Locale.US,remaining/1000)} km restantes"
+        val next = route.notes.getOrNull(result.noteIndex)
+        if (next == null) {
+            noteTitle.text = "FIN DE NOTAS"
+            noteDetail.text = "Atención al camino y señalización"
+        } else {
+            val follow = route.notes.getOrNull(result.noteIndex+1)
+            noteTitle.text = "${if(next.side == PaceNote.Side.LEFT) "↖ IZQUIERDA" else "↗ DERECHA"} ${next.grade}"
+            noteTitle.setTextColor(Color.parseColor(PaceNotes.color(next.grade)))
+            val uncertain = if (next.confidence < 0.7) " · baja confianza" else " · estimada"
+            noteDetail.text = "${result.distanceToNoteM.toInt()} m · ${PaceNotes.phrase(next, follow)}$uncertain"
         }
-        val next = notes[nextIndex]
-        val dist = (next.metresFromStart - progress).coerceAtLeast(0.0)
-        val follow = notes.getOrNull(nextIndex+1)
-        noteTitle.text = "${if(next.side == PaceNote.Side.LEFT) "↖ IZQUIERDA" else "↗ DERECHA"} ${next.grade}"
-        noteTitle.setTextColor(Color.parseColor(PaceNotes.color(next.grade)))
-        noteDetail.text = "${dist.toInt()} m · ${PaceNotes.phrase(next, follow).replaceFirstChar { it.uppercase() }} · estimada"
-        if (nextIndex > lastSpoken && dist <= PaceNotes.warningDistance(speed,warnFactor)) {
-            lastSpoken = nextIndex
-            val message = "En ${((dist/10).roundToInt()*10).coerceAtLeast(0)} metros, ${PaceNotes.phrase(next,follow)}"
+        result.announcement?.let { message ->
+            if (result.noteIndex >= 0 && !result.arrived) lastSpoken = result.noteIndex
             say(message)
         }
-        if (remaining < 20) { say("Llegaste al final del recorrido"); navigating=false; demo=false; action.text="INICIAR GPS" }
+        if (result.arrived) {
+            navigating = false; demo = false; action.text = "INICIAR GPS"
+            showDrivingControls(true)
+        }
     }
     private fun say(text: String) {
-        if (voiceOn && speakReady) tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "rally_${System.nanoTime()}")
+        if (voiceOn && speakReady) tts?.speak(text, TextToSpeech.QUEUE_ADD, null, "rally_${System.nanoTime()}")
     }
 
     private fun drawPlan() {
@@ -383,7 +422,10 @@ class MainActivity : Activity(), LocationListener {
         val dots = p.notes.map { n ->
             val index = p.metresAtPoint.indexOfFirst { it >= n.metresFromStart }.coerceIn(0,p.points.lastIndex)
             val at = p.points[index]
-            Feature.fromGeometry(Point.fromLngLat(at.longitude,at.latitude)).apply { addStringProperty("tone", PaceNotes.color(n.grade)) }
+            Feature.fromGeometry(Point.fromLngLat(at.longitude,at.latitude)).apply {
+                addStringProperty("tone", PaceNotes.color(n.grade))
+                addStringProperty("label", "${if(n.side==PaceNote.Side.LEFT) "I" else "D"}${n.grade}")
+            }
         }
         val dotsCollection = FeatureCollection.fromFeatures(dots)
         val dotsSource = s.getSourceAs<GeoJsonSource>("rally_dots")
@@ -392,6 +434,32 @@ class MainActivity : Activity(), LocationListener {
             s.addLayer(CircleLayer("rally_dots_layer","rally_dots").withProperties(
                 circleColor(Expression.get("tone")),circleRadius(5f),circleStrokeColor("#FFFFFF"),circleStrokeWidth(1.5f)))
         } else dotsSource.setGeoJson(dotsCollection)
+        if (s.getLayer("rally_note_labels") == null) {
+            s.addLayer(SymbolLayer("rally_note_labels", "rally_dots").withProperties(
+                textField(Expression.get("label")), textSize(12f), textColor("#FFFFFF"),
+                textHaloColor("#111827"), textHaloWidth(2f), textAllowOverlap(true),
+                textOffset(arrayOf(0f,-1.55f))))
+        }
+        drawWaypoints()
+    }
+    private fun drawWaypoints() {
+        val s = map?.style ?: return
+        val points = mutableListOf<Feature>()
+        chosenOrigin?.let { points.add(Feature.fromGeometry(Point.fromLngLat(it.longitude,it.latitude)).apply { addStringProperty("label","ORIGEN") }) }
+        target?.let { points.add(Feature.fromGeometry(Point.fromLngLat(it.longitude,it.latitude)).apply { addStringProperty("label","DESTINO") }) }
+        intermediatePoints.forEachIndexed { i,p ->
+            points.add(Feature.fromGeometry(Point.fromLngLat(p.longitude,p.latitude)).apply { addStringProperty("label","VÍA ${i+1}") })
+        }
+        val features = FeatureCollection.fromFeatures(points)
+        val source = s.getSourceAs<GeoJsonSource>("rally_waypoints")
+        if (source == null) {
+            s.addSource(GeoJsonSource("rally_waypoints", features))
+            s.addLayer(CircleLayer("rally_waypoints_circles", "rally_waypoints").withProperties(
+                circleColor("#43D9A6"), circleRadius(7f), circleStrokeColor("#FFFFFF"), circleStrokeWidth(2f)))
+            s.addLayer(SymbolLayer("rally_waypoints_labels", "rally_waypoints").withProperties(
+                textField(Expression.get("label")), textSize(12f), textColor("#FFFFFF"),
+                textHaloColor("#111827"), textHaloWidth(2f), textOffset(arrayOf(0f, -1.8f))))
+        } else source.setGeoJson(features)
     }
     private fun drawPosition(p: GeoPoint) {
         val s = map?.style ?: return
@@ -405,7 +473,9 @@ class MainActivity : Activity(), LocationListener {
         if (navigating || demo) {
             map?.animateCamera(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder()
                 .target(LatLng(p.latitude,p.longitude)).zoom(if(map3d) 16.2 else 15.5)
-                .tilt(if(map3d) 45.0 else 0.0).build()),400)
+                .tilt(if(map3d) 45.0 else 0.0)
+                .bearing(if(!demo && lastLocation?.hasBearing()==true) lastLocation!!.bearing.toDouble() else 0.0)
+                .build()),400)
         }
     }
     private fun drawLocation() { gps?.let { drawPosition(it) } }
@@ -441,7 +511,12 @@ class MainActivity : Activity(), LocationListener {
         else if (requestCode==900) status("Podés usar GPX y DEMO sin permiso GPS",true)
     }
     override fun onLocationChanged(location: Location) {
-        if (location.accuracy > 90f) return
+        if (location.hasAccuracy() && location.accuracy > 65f) {
+            if (navigating) status("Señal GPS débil: esperando precisión", true)
+            return
+        }
+        val ageNs = android.os.SystemClock.elapsedRealtimeNanos() - location.elapsedRealtimeNanos
+        if (ageNs > 15_000_000_000L || ageNs < -2_000_000_000L) return
         gps = GeoPoint(location.latitude,location.longitude); lastLocation=location
         if (!demo) drawPosition(gps!!)
         if (firstGpsCamera) { firstGpsCamera=false; centerGps() }
@@ -465,16 +540,48 @@ class MainActivity : Activity(), LocationListener {
         super.onActivityResult(requestCode,resultCode,data)
         if(resultCode!=RESULT_OK || data?.data==null) return
         when(requestCode) {
-            101 -> try {
-                val points=contentResolver.openInputStream(data.data!!)?.use { GpxIO.read(it) } ?: error("Archivo vacío")
-                setPlan(points,true); status("GPX cargado: ${plan?.notes?.size} curvas aproximadas",false)
-            } catch(e:Exception){status("GPX inválido: ${e.message}",true)}
-            102 -> try {
-                contentResolver.openOutputStream(data.data!!)?.bufferedWriter()?.use { it.write(GpxIO.write(plan!!.points)) }
-                status("GPX guardado en tu dispositivo",false)
-            } catch(e:Exception){status("No se pudo exportar: ${e.message}",true)}
+            101 -> {
+                val uri = data.data!!
+                execute("Analizando GPX", {
+                    val pts = contentResolver.openInputStream(uri)?.use { GpxIO.read(it) } ?: error("Archivo vacío")
+                    PaceNoteEngine.createPlan(pts)
+                }) { result ->
+                    setPreparedPlan(result as RoutePlan, true)
+                    status("GPX cargado: ${plan?.notes?.size} curvas aproximadas",false)
+                }
+            }
+            102 -> {
+                val uri = data.data!!
+                val pts = plan?.points.orEmpty()
+                execute("Guardando GPX", {
+                    contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { it.write(GpxIO.write(pts)) }
+                        ?: error("No fue posible abrir el archivo")
+                    true
+                }) { status("GPX guardado en tu dispositivo",false) }
+            }
         }
     }
+    private fun showPointOptions() {
+        val choices = arrayOf("Señalar destino en mapa", "Señalar origen en mapa", "Agregar parada intermedia",
+            "Usar GPS como origen", "Borrar todas las paradas")
+        android.app.AlertDialog.Builder(this).setTitle("ORIGEN · DESTINO · PARADAS")
+            .setItems(choices) { _, index ->
+                when (index) {
+                    0, 1, 2 -> {
+                        mapSelectMode = when(index) { 1 -> 1; 2 -> 2; else -> 0 }
+                        status("Mantené pulsado el punto elegido en el mapa", false)
+                    }
+                    3 -> { chosenOrigin = null; drawWaypoints(); status("Origen: GPS actual", false) }
+                    4 -> { intermediatePoints.clear(); drawWaypoints(); status("Paradas eliminadas", false) }
+                }
+            }.setNegativeButton("CERRAR",null).show()
+    }
+    private fun showDrivingControls(show: Boolean) {
+        controlsVisible = show
+        searchRow.visibility = if (navigating || demo) { if (show) View.VISIBLE else View.GONE } else View.VISIBLE
+        toolsRow.visibility = if (navigating || demo) { if (show) View.VISIBLE else View.GONE } else View.VISIBLE
+    }
+
     private fun showSettings() {
         val names=arrayOf("Aviso corto (4 s)","Aviso normal (7 s)","Aviso anticipado (10 s)","Volver a escuchar una nota", "Mostrar notas completas")
         android.app.AlertDialog.Builder(this).setTitle("COPILOTO · AJUSTES")
