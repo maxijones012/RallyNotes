@@ -72,6 +72,13 @@ class MainActivity : Activity(), LocationListener {
     private lateinit var banner: TextView
     private lateinit var noteTitle: TextView
     private lateinit var noteDetail: TextView
+    private lateinit var noteBadge: TextView
+    private lateinit var noteAccent: View
+    private lateinit var noteCard: LinearLayout
+    private lateinit var primaryNoteTile: RallyNoteTile
+    private lateinit var linkedNoteTile: RallyNoteTile
+    private lateinit var linkedNoteLabel: TextView
+    private lateinit var linkedNoteColumn: LinearLayout
     private lateinit var info: TextView
     private lateinit var searchRow: LinearLayout
     private lateinit var toolsRow: LinearLayout
@@ -148,6 +155,10 @@ class MainActivity : Activity(), LocationListener {
     }
 
     private fun dp(value: Int) = (resources.displayMetrics.density * value + 0.5f).toInt()
+    private fun systemBarInset(name: String): Int {
+        val id = resources.getIdentifier(name, "dimen", "android")
+        return if (id > 0) resources.getDimensionPixelSize(id) else 0
+    }
     private fun shape(color: String, radius: Int = 15, stroke: String? = null): GradientDrawable =
         GradientDrawable().apply {
             setColor(Color.parseColor(color)); cornerRadius = dp(radius).toFloat()
@@ -163,95 +174,175 @@ class MainActivity : Activity(), LocationListener {
         label(text, 13f, foreground, true).apply {
             gravity = Gravity.CENTER
             this.background = shape(background, 12, "#2D425E")
-            minHeight = dp(45)
-            setPadding(dp(9), dp(6), dp(9), dp(6))
+            minHeight = dp(48)
+            setPadding(dp(10), dp(8), dp(10), dp(8))
             isClickable = true
         }
     private fun LinearLayout.add(v: View, w: Int = -1, h: Int = -2, weight: Float = 0f) {
-        addView(v, LinearLayout.LayoutParams(w, h, weight))
+        val params = LinearLayout.LayoutParams(w, h, weight)
+        if (orientation == LinearLayout.HORIZONTAL && childCount > 0) {
+            params.marginStart = dp((tag as? Int) ?: 6)
+        }
+        addView(v, params)
     }
     private fun row(gap: Int = 8, contents: LinearLayout.() -> Unit): LinearLayout =
         LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            showDividers = LinearLayout.SHOW_DIVIDER_MIDDLE
-            dividerDrawable = android.graphics.drawable.ColorDrawable(Color.TRANSPARENT).apply { setBounds(0,0,dp(gap),1) }
+            tag = gap
             contents()
         }
 
+    private fun setNoteVisual(color: String, badge: String) {
+        noteAccent.setBackgroundColor(Color.parseColor(color))
+        noteCard.background = shape("#1D2B42", 10, "#2A4762")
+        noteBadge.text = badge
+        noteBadge.background = shape("#0E1727", 5, color)
+        noteBadge.setTextColor(Color.parseColor(color))
+        noteTitle.setTextColor(Color.parseColor(color))
+    }
+
+    private fun updateNoteCard(note: PaceNote, next: PaceNote?, distanceMetres: Double) {
+        val display = RallyNotePresentation.render(note, next, distanceMetres)
+        setNoteVisual(PaceNotes.color(display.grade), display.distanceLabel)
+        primaryNoteTile.visibility = View.VISIBLE
+        primaryNoteTile.show(display.grade, display.side)
+        noteTitle.text = display.headline
+        noteDetail.text = display.featuresLabel + if (display.lowConfidence) "  ·  APROXIMADA" else ""
+        val linked = display.chained
+        linkedNoteColumn.visibility = if (linked == null) View.GONE else View.VISIBLE
+        if (linked != null) {
+            linkedNoteTile.show(linked.grade, linked.side)
+            linkedNoteLabel.text = "ENLAZA"
+        }
+    }
+
+    private fun resetNoteCard(tone: String, badge: String, headline: String, subline: String) {
+        setNoteVisual(tone, badge)
+        primaryNoteTile.visibility = View.GONE
+        linkedNoteColumn.visibility = View.GONE
+        noteTitle.text = headline
+        noteDetail.text = subline
+    }
+
     private fun buildUI() {
         val root = FrameLayout(this)
+        root.setBackgroundColor(Color.parseColor("#070C14"))
         root.addView(mapView, FrameLayout.LayoutParams(-1, -1))
+        val topInset = systemBarInset("status_bar_height")
+        val bottomInset = systemBarInset("navigation_bar_height")
+
         val top = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(13), dp(12), dp(13), dp(13))
-            background = shape(bg, 17, "#2D4158")
+            setPadding(dp(14), dp(10) + topInset, dp(14), dp(14))
+            background = shape(bg, 16, "#294561")
             elevation = dp(10).toFloat()
         }
-        top.add(row(6) {
-            add(label("◢", 26f, sky, true), dp(35))
-            add(label("RALLY GPS AI", 18f, white, true), 0, -2, 1f)
+        top.add(row(8) {
+            add(label("◢", 23f, sky, true), dp(27))
+            add(label("RALLY GPS AI", 16f, white, true), 0, -2, 1f)
             modeButton = button("3D", panel, sky).also { it.setOnClickListener { toggle3D() } }
-            add(modeButton, dp(51))
+            add(modeButton, dp(56), dp(48))
             voiceButton = button(if (voiceOn) "VOZ ✓" else "MUDO", panel, sky).also { it.setOnClickListener {
                 voiceOn = !voiceOn; prefs.edit().putBoolean("voice", voiceOn).apply()
                 it as TextView; it.text = if (voiceOn) "VOZ ✓" else "MUDO"
                 if (!voiceOn) tts?.stop()
             } }
-            add(voiceButton, dp(75))
+            add(voiceButton, dp(78), dp(48))
         })
-        searchRow = row(6) {
+
+        searchRow = row(8) {
             searchInput = EditText(this@MainActivity).apply {
                 hint = "Destino: localidad, calle o dirección"; setHintTextColor(Color.parseColor("#758A9F"))
                 setTextColor(Color.WHITE); textSize = 14f; isSingleLine = true
-                setPadding(dp(10), 0, dp(5), 0); background = shape("#233148", 10)
+                setPadding(dp(12), 0, dp(8), 0); background = shape("#233148", 10)
                 imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
                 setOnEditorActionListener { _, _, _ -> lookupPlace(); true }
             }
-            add(searchInput, 0, dp(46), 1f)
-            add(button("BUSCAR", "#116B78", "#FFFFFF").apply { setOnClickListener { lookupPlace() } }, dp(73))
+            add(searchInput, 0, dp(50), 1f)
+            add(button("BUSCAR", "#116B78", "#FFFFFF").apply { setOnClickListener { lookupPlace() } }, dp(104), dp(50))
         }
-        val sp = LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(9) }
-        top.addView(searchRow, sp)
+        top.addView(searchRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
         banner = label("GPS buscando señal · mantené pulsado el mapa para elegir destino", 11f, muted)
-        top.addView(banner, LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(7) })
-        noteTitle = label("ELEGÍ UN DESTINO", 21f, white, true)
-        noteDetail = label("Se crearán las notas 1–6 automáticamente", 12f, muted)
-        val noteBox = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(14), dp(10), dp(14), dp(10))
-            background = shape("#1F2F47", 13, "#2B485C")
-            add(noteTitle); add(noteDetail)
+        top.addView(banner, LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(8) })
+
+        noteAccent = View(this).apply { setBackgroundColor(Color.parseColor(sky)) }
+        noteBadge = label("PACENOTE", 11f, sky, true).apply {
+            gravity = Gravity.CENTER_VERTICAL
         }
-        top.addView(noteBox, LinearLayout.LayoutParams(-1,-2).apply { topMargin = dp(10) })
+        noteTitle = label("ELEGÍ UN DESTINO", 21f, white, true).apply {
+            setSingleLine(false)
+        }
+        noteDetail = label("Se crearán las notas 1–6 automáticamente", 11.5f, muted).apply {
+            maxLines = 2
+        }
+        primaryNoteTile = RallyNoteTile(this).apply { visibility = View.GONE }
+        linkedNoteTile = RallyNoteTile(this)
+        linkedNoteLabel = label("ENLAZA", 9f, muted, true).apply { gravity = Gravity.CENTER }
+        linkedNoteColumn = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            visibility = View.GONE
+            addView(linkedNoteLabel, LinearLayout.LayoutParams(dp(66), dp(20)))
+            addView(linkedNoteTile, LinearLayout.LayoutParams(dp(66), dp(66)))
+        }
+        val noteWords = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(noteBadge, LinearLayout.LayoutParams(-1, -2))
+            addView(noteTitle, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(3) })
+            addView(noteDetail, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4) })
+        }
+        val noteContent = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(10), dp(10), dp(10), dp(10))
+            addView(primaryNoteTile, LinearLayout.LayoutParams(dp(78), dp(78)).apply { marginEnd = dp(10) })
+            addView(noteWords, LinearLayout.LayoutParams(0, -2, 1f))
+            addView(linkedNoteColumn, LinearLayout.LayoutParams(dp(66), -2).apply { marginStart = dp(6) })
+        }
+        noteCard = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            background = shape("#1D2B42", 9, "#2A4762")
+            addView(noteAccent, LinearLayout.LayoutParams(dp(5), -1))
+            addView(noteContent, LinearLayout.LayoutParams(0, -2, 1f))
+        }
+        top.addView(noteCard, LinearLayout.LayoutParams(-1,-2).apply { topMargin = dp(10) })
+        resetNoteCard(sky, "RALLY GPS AI", "ELEGÍ UN DESTINO", "Se crearán las notas 1–6 automáticamente")
+
         root.addView(top, FrameLayout.LayoutParams(-1,-2,Gravity.TOP).apply {
             setMargins(dp(9),dp(8),dp(9),0)
         })
 
         val bottom = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = shape(bg, 19, "#34506C")
+            background = shape(bg, 18, "#34506C")
             setPadding(dp(12), dp(10), dp(12), dp(12))
             elevation=dp(10).toFloat()
         }
         info = label("SIN RUTA · GPS", 13f, muted, true).apply { gravity=Gravity.CENTER }
-        bottom.add(info)
-        bottom.add(row(7) {
+        bottom.addView(info, LinearLayout.LayoutParams(-1, -2))
+
+        val actionRow = row(8) {
             action = button("TRAZAR RUTA", "#0E8BA1", "#FFFFFF").also { it.setOnClickListener { mainAction() } }
-            add(action, 0, dp(49), 1f)
+            add(action, 0, dp(52), 1.5f)
             nextButton = button("DEMO", "#463377", "#FFFFFF").also { it.setOnClickListener { startDemo() } }
-            add(nextButton, dp(77), dp(49))
+            add(nextButton, 0, dp(52), 0.8f)
             gpsButton = button("◎ GPS", panel, sky).also { it.setOnClickListener { centerGps() } }
-            add(gpsButton, dp(73), dp(49))
-        })
-        toolsRow = row(5) {
-            add(button("PUNTOS").apply { setOnClickListener { showPointOptions() } }, 0,dp(43),1f)
-            add(button("GPX ↓").apply { setOnClickListener { importGpx() } }, 0,dp(43),1f)
-            add(button("GPX ↑").apply { setOnClickListener { exportGpx() } }, 0,dp(43),1f)
-            add(button("AJUSTES").apply { setOnClickListener { showSettings() } },0,dp(43),1f)
+            add(gpsButton, 0, dp(52), 0.72f)
         }
-        bottom.add(toolsRow)
-        root.addView(bottom, FrameLayout.LayoutParams(-1,-2,Gravity.BOTTOM).apply { setMargins(dp(9),0,dp(9),dp(11)) })
+        bottom.addView(actionRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(9) })
+
+        toolsRow = row(6) {
+            add(button("PUNTOS").apply { setOnClickListener { showPointOptions() } }, 0,dp(46),1f)
+            add(button("GPX ↓").apply { setOnClickListener { importGpx() } }, 0,dp(46),1f)
+            add(button("GPX ↑").apply { setOnClickListener { exportGpx() } }, 0,dp(46),1f)
+            add(button("AJUSTES").apply { setOnClickListener { showSettings() } },0,dp(46),1f)
+        }
+        bottom.addView(toolsRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+        root.addView(bottom, FrameLayout.LayoutParams(-1,-2,Gravity.BOTTOM).apply {
+            setMargins(dp(9),0,dp(9),dp(10) + bottomInset)
+        })
         setContentView(root)
     }
 
@@ -288,7 +379,7 @@ class MainActivity : Activity(), LocationListener {
             navigating = false; demo = false; tts?.stop(); lastSpoken = -1
             showDrivingControls(true)
             action.text = "INICIAR GPS"; nextButton.text = "DEMO"
-            noteTitle.text = "NAVEGACIÓN DETENIDA"
+            resetNoteCard("#F0475A", "STOP", "NAVEGACIÓN DETENIDA", "Podés retomar el recorrido o trazar uno nuevo")
             status("Recorrido guardado. Podés retomarlo.", false)
             return
         }
@@ -315,8 +406,7 @@ class MainActivity : Activity(), LocationListener {
         action.text = "INICIAR GPS"; nextButton.text = "DEMO"
         showDrivingControls(false)
         val km = "%.1f".format(Locale.US, parsed.totalMetres / 1000.0)
-        noteTitle.text = "${parsed.notes.size} NOTAS DETECTADAS"
-        noteDetail.text = "${km} km · Revisá curvas y recorridos antes de iniciar"
+        resetNoteCard("#22D3EE", "RUTA LISTA", "${parsed.notes.size} NOTAS DETECTADAS", "${km} KM  ·  REVISÁ LAS NOTAS ANTES DE SALIR")
         info.text = "$km KM  •  ${parsed.notes.size} CURVAS  •  1–6"
         drawPlan()
         if (save && parsed.points.size <= 30000) prefs.edit().putString("last_route", RouteStore.serialize(parsed.points)).apply()
@@ -373,14 +463,10 @@ class MainActivity : Activity(), LocationListener {
         info.text = "${(speed*3.6).toInt().coerceAtLeast(0)} km/h  •  ${"%.1f".format(Locale.US,remaining/1000)} km restantes"
         val next = route.notes.getOrNull(result.noteIndex)
         if (next == null) {
-            noteTitle.text = "FIN DE NOTAS"
-            noteDetail.text = "Atención al camino y señalización"
+            resetNoteCard("#43D9A6", "FIN", "TRAMO LIMPIO", "SIN NOTAS INMEDIATAS  ·  ATENCIÓN AL CAMINO")
         } else {
             val follow = route.notes.getOrNull(result.noteIndex+1)
-            noteTitle.text = "${if(next.side == PaceNote.Side.LEFT) "↖ IZQUIERDA" else "↗ DERECHA"} ${next.grade}"
-            noteTitle.setTextColor(Color.parseColor(PaceNotes.color(next.grade)))
-            val uncertain = if (next.confidence < 0.7) " · baja confianza" else " · estimada"
-            noteDetail.text = "${result.distanceToNoteM.toInt()} m · ${PaceNotes.phrase(next, follow)}$uncertain"
+            updateNoteCard(next, follow, result.distanceToNoteM)
         }
         result.announcement?.let { message ->
             if (result.noteIndex >= 0 && !result.arrived) lastSpoken = result.noteIndex
