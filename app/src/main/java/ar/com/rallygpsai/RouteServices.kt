@@ -24,12 +24,113 @@ object RouteServices {
         } finally { con.disconnect() }
     }
 
-    fun search(place: String): GeoPoint? {
-        val q = URLEncoder.encode(place.trim(), "UTF-8")
-        val arr = JSONArray(get("https://nominatim.openstreetmap.org/search?q=$q&format=json&limit=1"))
-        if (arr.length() == 0) return null
-        val item = arr.getJSONObject(0)
-        return GeoPoint(item.getString("lat").toDouble(), item.getString("lon").toDouble())
+    /** Coincidencia geográfica: no asumir que una calle sin altura es el domicilio pedido. */
+    data class PlaceCandidate(val point: GeoPoint, val address: String, val distanceKm: Double?,
+                              val approximate: Boolean, val sourceType: String)
+
+    private val numberPattern = Regex("(?:^|\\s)(\\d{1,5})(?:\\s|$)")
+    private val explicitCountry = Regex("\\b(uruguay|chile|brasil|brazil|bolivia|paraguay|perú|peru)\\b", RegexOption.IGNORE_CASE)
+    private var lastRequestAt = 0L
+    private var localityCache: Triple<GeoPoint, String, String>? = null
+
+    @Synchronized private fun queryNominatim(url: String): JSONArray {
+        // Política del endpoint público: máximo una consulta por segundo por cliente.
+        val wait = 1150L - (System.currentTimeMillis() - lastRequestAt)
+        if (wait > 0) Thread.sleep(wait)
+        lastRequestAt = System.currentTimeMillis()
+        return JSONArray(get(url))
+    }
+
+    @Synchronized private fun queryNominatimText(url: String): String {
+        val wait = 1150L - (System.currentTimeMillis() - lastRequestAt)
+        if (wait > 0) Thread.sleep(wait)
+        lastRequestAt = System.currentTimeMillis()
+        return get(url)
+    }
+
+    fun searchResults(place: String, nearby: GeoPoint?): List<PlaceCandidate> {
+        val q = place.trim().take(140)
+        require(q.length >= 3) { "Ingresá una calle, altura o localidad" }
+        // Comas no implican ciudad: "25 de Mayo, 456" sigue siendo dirección local.
+        val explicitLocation = q.count { it == ',' } >= 2 || q.contains(Regex("\\b(trelew|rawson|madryn|comodoro|neuqu[eé]n|buenos aires|montevideo|córdoba|argentina|uruguay|chubut)\\b", RegexOption.IGNORE_CASE))
+        val requestedNumber = numberPattern.findAll(q).lastOrNull()?.groupValues?.get(1)
+        // Preferir la región GPS, nunca una coincidencia arbitraria mundial.
+        val viewbox = nearby?.let { p ->
+            val dy = 0.65; val dx = 0.65 / cos(Math.toRadians(p.latitude)).coerceAtLeast(0.25)
+            "&viewbox=${p.longitude-dx},${p.latitude+dy},${p.longitude+dx},${p.latitude-dy}&bounded=0"
+        } ?: ""
+        val country = when {
+            q.contains(Regex("\\b(uruguay|montevideo|punta del este)\\b", RegexOption.IGNORE_CASE)) -> "&countrycodes=uy"
+            q.contains(Regex("\\b(chile|santiago de chile|valpara[ií]so)\\b", RegexOption.IGNORE_CASE)) -> "&countrycodes=cl"
+            explicitCountry.containsMatchIn(q) -> ""
+            q.contains(Regex("\\b(argentina|trelew|rawson|chubut|madryn|comodoro|neuqu[eé]n)\\b", RegexOption.IGNORE_CASE)) -> "&countrycodes=ar"
+            nearby != null && nearby.latitude in -35.2..-30.0 && nearby.longitude in -59.0..-53.0 -> "&countrycodes=uy"
+            nearby == null || nearby.latitude in -56.0..-21.0 && nearby.longitude in -74.0..-53.0 -> "&countrycodes=ar"
+            else -> ""
+        }
+        fun find(text: String): JSONArray {
+            val encoded = URLEncoder.encode(text,"UTF-8")
+            return queryNominatim("https://nominatim.openstreetmap.org/search?q=$encoded&format=json&addressdetails=1&limit=10&dedupe=1$viewbox$country")
+        }
+        // Sin ciudad explícita, localizar la localidad real del GPS una vez
+        // y consultar la dirección como la escribe el usuario, pero contextualizada.
+        var arr: JSONArray
+        var fallback = false
+        var contextual = q
+        if (nearby != null && !explicitLocation) {
+            val cached = localityCache
+            val locationName = if (cached != null && DrivingCamera.distance(cached.first, nearby) < 20_000) {
+                "${cached.second}, ${cached.third}"
+            } else {
+                val url = "https://nominatim.openstreetmap.org/reverse?format=json&lat=${nearby.latitude}&lon=${nearby.longitude}&zoom=10&addressdetails=1"
+                val address = JSONObject(queryNominatimText(url)).optJSONObject("address")
+                val city = listOf("city", "town", "village", "municipality", "county").firstNotNullOfOrNull { key ->
+                    address?.optString(key)?.takeIf { it.isNotBlank() }
+                }.orEmpty()
+                val state = address?.optString("state").orEmpty()
+                if (city.isNotBlank()) localityCache = Triple(nearby,city,state)
+                "$city, $state"
+            }
+            if (locationName.trim(' ', ',').isNotEmpty()) contextual = "$q, $locationName"
+        }
+        arr = find(contextual)
+        if (arr.length() == 0 && contextual != q) arr = find(q)
+        val nearbyExact = nearby == null || (0 until arr.length()).any { index ->
+            val match = arr.getJSONObject(index)
+            val lat = match.optDouble("lat",Double.NaN); val lon = match.optDouble("lon",Double.NaN)
+            lat.isFinite() && lon.isFinite() && DrivingCamera.distance(nearby,GeoPoint(lat,lon)) < 160_000
+        }
+        if ((arr.length()==0 || (!explicitLocation && !nearbyExact)) && requestedNumber != null) {
+            // Si OSM no tiene numeración local, ofrecer la calle cercana como aproximada.
+            val simplified = q.replace(Regex("\\b${Regex.escape(requestedNumber)}\\b"), "")
+                .replace(Regex("\\s+"), " ").trim(' ', ',')
+            if (simplified.length >= 3) {
+                val suffix = if (contextual != q) contextual.removePrefix(q) else ""
+                arr = find(simplified + suffix)
+                fallback = true
+            }
+        }
+        val out = mutableListOf<PlaceCandidate>()
+        for (i in 0 until arr.length()) {
+            val item=arr.getJSONObject(i)
+            val lat=item.optDouble("lat",Double.NaN); val lon=item.optDouble("lon",Double.NaN)
+            if (!lat.isFinite() || !lon.isFinite()) continue
+            val point=GeoPoint(lat,lon)
+            val distance=nearby?.let { DrivingCamera.distance(it,point)/1000.0 }
+            val address=item.optJSONObject("address")
+            val house=address?.optString("house_number", "").orEmpty()
+            val approximate=fallback || (requestedNumber != null && house != requestedNumber)
+            out.add(PlaceCandidate(point,item.optString("display_name","Ubicación"),distance,approximate,
+                item.optString("type", "")))
+        }
+        // El orden favorece geográficamente el GPS, sin falsear la calidad del dato.
+        // No sugerir como destino local una calle al otro lado del continente.
+        val filtered = if (nearby != null && !explicitLocation)
+            out.filter { (it.distanceKm ?: 1e6) <= 160.0 }
+        else out
+        return filtered.sortedWith(compareBy<PlaceCandidate> { if (nearby != null && !explicitLocation) {
+            when { (it.distanceKm ?: 1e6) < 15 -> 0; (it.distanceKm ?: 1e6) < 80 -> 1; (it.distanceKm ?: 1e6) < 250 -> 2; else -> 3 }
+        } else 0 }.thenBy { it.approximate }.thenBy { it.distanceKm ?: 0.0 })
     }
 
     fun route(start: GeoPoint, via: List<GeoPoint>, end: GeoPoint): List<GeoPoint> {
