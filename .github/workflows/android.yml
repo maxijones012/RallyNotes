@@ -24,6 +24,10 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
+      - name: Instalar codificador de audio
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
       - name: Preparar audio offline redistribuible CarlFM
         run: |
           python3 -m pip install --disable-pip-version-check 'piper-tts==1.8.0'
