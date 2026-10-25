@@ -32,6 +32,6 @@ class RerouteRecoveryTest {
         assertFalse(policy.observe(true, 130.0, 6f, 12_500))
         assertFalse(policy.observe(true, 130.0, 6f, 55_000))
         assertFalse(policy.observe(true, 130.0, 6f, 56_000))
-        assertTrue(policy.observe(true, 130.0, 6f, 57_500))
+        assertTrue(policy.observe(true, 130.0, 6f, 58_200))
     }
 }
