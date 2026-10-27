@@ -55,6 +55,7 @@ class MainActivity : Activity(), LocationListener {
     private var chosenOrigin: GeoPoint? = null
     private val intermediatePoints = mutableListOf<GeoPoint>()
     private var mapSelectMode = 0 // 0 destino, 1 origen, 2 parada
+    private var destinationTapArmed = false // activado sólo desde PUNTOS → señalar destino
     private var navigator: NavigationEngine? = null
     private var controlsVisible = false
     private lateinit var locationManager: LocationManager
@@ -97,6 +98,7 @@ class MainActivity : Activity(), LocationListener {
     private lateinit var info: TextView
     private lateinit var tripDistance: TextView
     private lateinit var searchRow: LinearLayout
+    private lateinit var destinationIndicator: TextView
     private lateinit var toolsRow: LinearLayout
     private lateinit var action: TextView
     private lateinit var gpsButton: TextView
@@ -142,18 +144,24 @@ class MainActivity : Activity(), LocationListener {
                         } else status("Máximo de cuatro paradas", true)
                     }
                     else -> {
-                        target = point
-                        status("DESTINO SELECCIONADO · tocá TRAZAR RUTA", false)
-                        Toast.makeText(this, "Destino marcado en el mapa", Toast.LENGTH_SHORT).show()
+                        chooseDestination(point, "PUNTO DEL MAPA")
+                        Toast.makeText(this, "✓ Destino elegido", Toast.LENGTH_SHORT).show()
                     }
                 }
                 mapSelectMode = 0
+                destinationTapArmed = false
                 drawWaypoints()
                 true
             }
-            loaded.addOnMapClickListener {
-                if (navigating || demo) showDrivingControls(!controlsVisible)
-                false
+            loaded.addOnMapClickListener { position ->
+                if (destinationTapArmed && !navigating && !demo) {
+                    chooseDestination(GeoPoint(position.latitude, position.longitude), "PUNTO DEL MAPA")
+                    Toast.makeText(this, "✓ Destino elegido", Toast.LENGTH_SHORT).show()
+                    true
+                } else {
+                    if (navigating || demo) showDrivingControls(!controlsVisible)
+                    false
+                }
             }
             loaded.moveCamera(CameraUpdateFactory.newCameraPosition(
                 CameraPosition.Builder().target(LatLng(-40.0, -64.0)).zoom(3.7).build()
@@ -169,6 +177,8 @@ class MainActivity : Activity(), LocationListener {
             pendingStops = prefs.getString("last_road_stops", null)?.let {
                 runCatching { RouteStore.deserialize(it) }.getOrDefault(emptyList())
             } ?: emptyList()
+            updateDestinationIndicator("DESTINO GUARDADO")
+            drawWaypoints()
         }
         requestGps()
     }
@@ -287,6 +297,21 @@ class MainActivity : Activity(), LocationListener {
             add(button("BUSCAR", "#116B78", "#FFFFFF").apply { setOnClickListener { lookupPlace() } }, dp(104), dp(50))
         }
         top.addView(searchRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
+        // The destination stays visible even if fresh GPS fixes overwrite the status line.
+        destinationIndicator = label("✓ DESTINO ELEGIDO", 12f, "#ADFFE0", true).apply {
+            visibility = View.GONE
+            isClickable = true
+            background = shape("#103C35", 8, "#2C977E")
+            setPadding(dp(10), dp(8), dp(10), dp(8))
+            setOnClickListener {
+                val fixed = target ?: routeDestination
+                if (fixed != null) {
+                    map?.animateCamera(CameraUpdateFactory.newLatLngZoom(
+                        LatLng(fixed.latitude, fixed.longitude), 16.0), 450)
+                }
+            }
+        }
+        top.addView(destinationIndicator, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(7) })
         banner = label("GPS buscando señal · mantené pulsado el mapa para elegir destino", 11f, muted)
         top.addView(banner, LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(8) })
 
@@ -403,6 +428,28 @@ class MainActivity : Activity(), LocationListener {
         setContentView(root)
     }
 
+    private fun updateDestinationIndicator(summary: String? = null, approximate: Boolean = false) {
+        val point = target ?: routeDestination
+        if (point == null) {
+            destinationIndicator.visibility = View.GONE
+            return
+        }
+        destinationIndicator.visibility = if ((navigating || demo) && !controlsVisible) View.GONE else View.VISIBLE
+        val suffix = if (approximate) " · APROXIMADO" else ""
+        val name = summary?.take(45)?.takeIf { it.isNotBlank() } ?: "PUNTO MARCADO"
+        destinationIndicator.text = "✓ DESTINO: $name$suffix  ·  TOCÁ PARA VER"
+        destinationIndicator.setTextColor(Color.parseColor(if (approximate) "#FFE49D" else "#ADFFE0"))
+    }
+
+    private fun chooseDestination(point: GeoPoint, name: String, approximate: Boolean = false) {
+        target = point
+        destinationTapArmed = false
+        updateDestinationIndicator(name, approximate)
+        drawWaypoints()
+        status(if (approximate) "Dirección aproximada: verificá el pin en el mapa"
+            else "Destino confirmado · tocá TRAZAR RUTA", approximate)
+    }
+
     private fun status(message: String, error: Boolean) {
         banner.text = message
         banner.setTextColor(Color.parseColor(if (error) "#FF907B" else muted))
@@ -440,9 +487,8 @@ class MainActivity : Activity(), LocationListener {
                 .setTitle("ELEGÍ EL DESTINO CORRECTO")
                 .setItems(entries) { _, index ->
                     val choice = matches[index]
-                    target = choice.point
                     searchInput.setText(name)
-                    drawWaypoints()
+                    chooseDestination(choice.point, choice.address, choice.approximate)
                     map?.animateCamera(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder()
                         .target(LatLng(choice.point.latitude,choice.point.longitude))
                         .zoom(16.0).bearing(0.0).tilt(0.0).build()), 550)
@@ -480,6 +526,8 @@ class MainActivity : Activity(), LocationListener {
                 .putString("last_road_destination", RouteStore.serialize(listOf(destination)))
                 .putString("last_road_stops", RouteStore.serialize(stops)).apply()
             target = null
+            updateDestinationIndicator("DESTINO DE LA RUTA")
+            drawWaypoints()
             status("Ruta calculada. Si te desviás, intentará recalcular con internet.", false)
         }
     }
@@ -491,6 +539,7 @@ class MainActivity : Activity(), LocationListener {
         reroutePolicy.reset()
         routeDestination = null
         pendingStops = emptyList()
+        updateDestinationIndicator()
         if (save) prefs.edit().remove("last_road_destination").remove("last_road_stops").apply()
         plan = parsed; navigator = NavigationEngine(parsed) { warnFactor }; drivingCamera.reset()
         positionIndex = 0; lastSpoken = -1; currentNote = 0
@@ -990,7 +1039,9 @@ class MainActivity : Activity(), LocationListener {
                 when (index) {
                     0, 1, 2 -> {
                         mapSelectMode = when(index) { 1 -> 1; 2 -> 2; else -> 0 }
-                        status("Mantené pulsado el punto elegido en el mapa", false)
+                        destinationTapArmed = index == 0
+                        status(if (index == 0) "Tocá el punto en el mapa para marcar destino" else
+                            "Mantené pulsado el punto elegido en el mapa", false)
                     }
                     3 -> { chosenOrigin = null; drawWaypoints(); status("Origen: GPS actual", false) }
                     4 -> { intermediatePoints.clear(); drawWaypoints(); status("Paradas eliminadas", false) }
@@ -1001,6 +1052,7 @@ class MainActivity : Activity(), LocationListener {
         controlsVisible = show
         searchRow.visibility = if (navigating || demo) { if (show) View.VISIBLE else View.GONE } else View.VISIBLE
         toolsRow.visibility = if (navigating || demo) { if (show) View.VISIBLE else View.GONE } else View.VISIBLE
+        updateDestinationIndicator()
     }
 
     private fun showSettings() {
