@@ -1250,8 +1250,8 @@ class MainActivity : Activity(), LocationListener {
 
     private fun showSettings() {
         val names=arrayOf("Aviso corto (4 s)","Aviso normal (7 s)","Aviso anticipado (10 s)",
-            "Volver a escuchar una nota", "Mostrar notas completas", "Elegir voz de copiloto", "Probar voz de rally", "Elegir voz TTS Android", "Velocidad y tono TTS", "Instalar/cambiar motor TTS", "Licencias de voz", "Elegir vehículo del GPS")
-        android.app.AlertDialog.Builder(this).setTitle("COPILOTO · AJUSTES")
+            "Volver a escuchar una nota", "Mostrar notas completas", "Elegir voz de copiloto", "Probar voz de rally", "Elegir voz TTS Android", "Velocidad y tono TTS", "Instalar/cambiar motor TTS", "Licencias de voz", "Elegir vehículo del GPS", tr("change"))
+        android.app.AlertDialog.Builder(this).setTitle("COPILOTO · " + tr("settings"))
             .setItems(names) { _, i ->
                 if(i in 0..2) { warnFactor=i; prefs.edit().putInt("anticipation",i).apply();status("Anticipación: ${names[i]}",false) }
                 if(i==3) plan?.notes?.getOrNull(lastSpoken)?.let {
@@ -1263,6 +1263,7 @@ class MainActivity : Activity(), LocationListener {
                 if (i==8) adjustVoice()
                 if (i==9) openTtsSettings()
                 if (i==11) selectVehicleMarker()
+                if (i==12) showWelcomeSetup(firstRun = false)
                 if (i==10) android.app.AlertDialog.Builder(this).setTitle("LICENCIAS")
                     .setMessage("CarlFM (es-ES) · rhasspy/piper-voices · MIT. Dataset: dominio público. El modelo y el sintetizador no están incluidos, solo audios OGG. Más datos en github.com/maxijones012/RallyNotes/blob/main/docs/VOICE_LICENSES.md")
                     .setPositiveButton("CERRAR",null).show()
