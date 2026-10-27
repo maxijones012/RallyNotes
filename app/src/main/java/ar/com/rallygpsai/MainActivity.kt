@@ -368,20 +368,30 @@ class MainActivity : Activity(), LocationListener {
 
     private fun updateNoteCard(note: PaceNote, next: PaceNote?, distanceMetres: Double) {
         val display = RallyNotePresentation.render(note, next, distanceMetres)
-        setNoteVisual(PaceNotes.color(display.grade), "NOTA DE RALLY")
+        setNoteVisual(PaceNotes.color(display.grade), tr("note"))
         nextTurnDistance.visibility = View.VISIBLE
         distanceNumber.text = display.distanceValue
         distanceNumber.textSize = if (display.distanceUnit.isEmpty()) 29f else 39f
         distanceUnit.text = display.distanceUnit
         primaryNoteTile.visibility = View.VISIBLE
         primaryNoteTile.show(display.grade, display.side)
-        noteTitle.text = display.headline
-        noteDetail.text = display.featuresLabel + if (display.lowConfidence) "  ·  APROXIMADA" else ""
+        noteTitle.text = if (display.side == PaceNote.Side.LEFT) tr("left") else tr("right")
+        noteDetail.text = if (RallyLanguage.isSpanish(appLanguage)) {
+            display.featuresLabel + if (display.lowConfidence) " · " + tr("approx") else ""
+        } else {
+            val details = mutableListOf<String>()
+            if (note.cumulativeTurnDegrees >= 145 && note.grade <= 2) details += tr("hairpin")
+            if (note.endMetres-note.metresFromStart >= 95.0 || (note.cumulativeTurnDegrees >= 95 && note.grade >= 3)) details += tr("long")
+            note.tightensTo?.let { if (it < note.grade) details += tr("close") + " " + it }
+            note.opensTo?.let { if (it > note.grade) details += tr("open") + " " + it }
+            if (display.lowConfidence) details += tr("approx")
+            details.joinToString(" · ").ifBlank { tr("note") }
+        }
         val linked = display.chained
         linkedNoteColumn.visibility = if (linked == null) View.GONE else View.VISIBLE
         if (linked != null) {
             linkedNoteTile.show(linked.grade, linked.side)
-            linkedNoteLabel.text = "ENLAZA"
+            linkedNoteLabel.text = tr("linked")
         }
     }
 
@@ -841,8 +851,8 @@ class MainActivity : Activity(), LocationListener {
                 }
                 speakReady = true
                 val engine = tts ?: return@runOnUiThread
-                val language = engine.setLanguage(Locale("es", "AR"))
-                if (language < TextToSpeech.LANG_AVAILABLE) engine.language = Locale("es", "ES")
+                val language = engine.setLanguage(RallyLanguage.locale(appLanguage))
+                if (language < TextToSpeech.LANG_AVAILABLE && RallyLanguage.isSpanish(appLanguage)) engine.language = Locale("es", "ES")
                 engine.setAudioAttributes(AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
@@ -851,15 +861,15 @@ class MainActivity : Activity(), LocationListener {
         }
     }
 
-    private fun availableSpanishVoices(): List<Voice> = tts?.voices.orEmpty()
-        .filter { it.locale.language == "es" && !it.isNetworkConnectionRequired }
-        .sortedWith(compareBy<Voice> { if (it.locale.country == "AR") 0 else if (it.locale.country == "MX") 1 else 2 }
+    private fun availableLocalizedVoices(): List<Voice> = tts?.voices.orEmpty()
+        .filter { it.locale.language == RallyLanguage.locale(appLanguage).language && !it.isNetworkConnectionRequired }
+        .sortedWith(compareBy<Voice> { if (it.locale.country == RallyLanguage.locale(appLanguage).country) 0 else 1 }
             .thenBy { it.name })
 
     private fun applyVoicePreferences() {
         val engine = tts ?: return
         val savedVoice = prefs.getString("voice_name", null)
-        availableSpanishVoices().firstOrNull { it.name == savedVoice }?.let { engine.setVoice(it) }
+        availableLocalizedVoices().firstOrNull { it.name == savedVoice }?.let { engine.setVoice(it) }
         engine.setSpeechRate(prefs.getFloat("voice_speed", 1.15f))
         engine.setPitch(prefs.getFloat("voice_pitch", 0.96f))
     }
@@ -915,10 +925,9 @@ class MainActivity : Activity(), LocationListener {
     private fun speakRallyNote(note: PaceNote, next: PaceNote?, distance: Double) {
         if (!voiceOn) return
         val mode = prefs.getString("rally_voice_mode", RallyVoicePack.SYSTEM) ?: RallyVoicePack.SYSTEM
-        val phrase = PaceNotes.phrase(note, next)
-        val prefix = if (distance <= 22.0) "Ahora, " else
-            "En ${((distance / 10.0).roundToInt() * 10).coerceIn(20, 400)} metros, "
-        if (mode != RallyVoicePack.SYSTEM) {
+        val phrase = RallyLanguage.call(appLanguage, note, next)
+        val prefix = RallyLanguage.distanceCall(appLanguage, distance) + ", "
+        if (mode != RallyVoicePack.SYSTEM && RallyLanguage.isSpanish(appLanguage)) {
             tts?.stop()
             if (rallyAudio.play(mode, RallyVoicePack.tokens(note, next, distance))) return
             status("Pack de voz no disponible; utilizando voz Android", true)
@@ -927,6 +936,11 @@ class MainActivity : Activity(), LocationListener {
     }
 
     private fun selectRallyVoiceMode() {
+        if (!RallyLanguage.isSpanish(appLanguage)) {
+            status("Recorded CarlFM clips are Spanish-only; using Android TTS", false)
+            prefs.edit().putString("rally_voice_mode", RallyVoicePack.SYSTEM).apply()
+            return
+        }
         val choices = arrayOf("Voz Android (TTS)", "CarlFM · claro · offline", "CarlFM · radio de rally · offline")
         val modes = RallyVoicePack.modes
         val saved = prefs.getString("rally_voice_mode", RallyVoicePack.SYSTEM) ?: RallyVoicePack.SYSTEM
