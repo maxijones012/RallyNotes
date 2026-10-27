@@ -72,6 +72,7 @@ class MainActivity : Activity(), LocationListener {
     private val drivingCamera = DrivingCamera()
     private var followRouteCamera = true
     private var voiceOn = true
+    private var appLanguage = "es-AR"
     private var warnFactor = 1
     private var positionIndex = 0
     private var lastSpoken = -1
@@ -100,6 +101,10 @@ class MainActivity : Activity(), LocationListener {
     private lateinit var info: TextView
     private lateinit var tripDistance: TextView
     private lateinit var searchRow: LinearLayout
+    private lateinit var searchButton: TextView
+    private lateinit var pointsButton: TextView
+    private lateinit var settingsButton: TextView
+    private lateinit var nextCurveCaption: TextView
     private lateinit var destinationIndicator: TextView
     private lateinit var toolsRow: LinearLayout
     private lateinit var action: TextView
@@ -113,6 +118,7 @@ class MainActivity : Activity(), LocationListener {
     private val white = "#F8FAFC"
     private val muted = "#9AA9BD"
     private val prefs by lazy { getSharedPreferences("rally_v1", MODE_PRIVATE) }
+    private fun tr(key: String) = RallyLanguage.text(appLanguage, key)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -122,6 +128,7 @@ class MainActivity : Activity(), LocationListener {
         mapView = MapView(this)
         mapView.onCreate(savedInstanceState)
         locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
+        appLanguage = RallyLanguage.normalized(prefs.getString(RallyLanguage.KEY, RallyLanguage.defaultFor(Locale.getDefault())))
         voiceOn = prefs.getBoolean("voice", true)
         warnFactor = prefs.getInt("anticipation", 1)
         buildUI()
@@ -182,7 +189,8 @@ class MainActivity : Activity(), LocationListener {
             updateDestinationIndicator("DESTINO GUARDADO")
             drawWaypoints()
         }
-        requestGps()
+        if (prefs.getBoolean(RallyLanguage.SETUP_KEY, false)) requestGps()
+        else showWelcomeSetup(firstRun = true)
     }
 
     private fun dp(value: Int) = (resources.displayMetrics.density * value + 0.5f).toInt()
@@ -279,9 +287,9 @@ class MainActivity : Activity(), LocationListener {
             add(label("RALLY GPS AI", 16f, white, true), 0, -2, 1f)
             modeButton = button("3D", panel, sky).also { it.setOnClickListener { toggle3D() } }
             add(modeButton, dp(56), dp(48))
-            voiceButton = button(if (voiceOn) "VOZ ✓" else "MUDO", panel, sky).also { it.setOnClickListener {
+            voiceButton = button(if (voiceOn) tr("voice_on") else tr("voice_off"), panel, sky).also { it.setOnClickListener {
                 voiceOn = !voiceOn; prefs.edit().putBoolean("voice", voiceOn).apply()
-                it as TextView; it.text = if (voiceOn) "VOZ ✓" else "MUDO"
+                it as TextView; it.text = if (voiceOn) tr("voice_on") else tr("voice_off")
                 if (!voiceOn) { tts?.stop(); rallyAudio.stop() }
             } }
             add(voiceButton, dp(78), dp(48))
@@ -289,14 +297,15 @@ class MainActivity : Activity(), LocationListener {
 
         searchRow = row(8) {
             searchInput = EditText(this@MainActivity).apply {
-                hint = "Destino: localidad, calle o dirección"; setHintTextColor(Color.parseColor("#758A9F"))
+                hint = tr("search_hint"); setHintTextColor(Color.parseColor("#758A9F"))
                 setTextColor(Color.WHITE); textSize = 14f; isSingleLine = true
                 setPadding(dp(12), 0, dp(8), 0); background = shape("#233148", 10)
                 imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
                 setOnEditorActionListener { _, _, _ -> lookupPlace(); true }
             }
             add(searchInput, 0, dp(50), 1f)
-            add(button("BUSCAR", "#116B78", "#FFFFFF").apply { setOnClickListener { lookupPlace() } }, dp(104), dp(50))
+            searchButton = button(tr("search"), "#116B78", "#FFFFFF").apply { setOnClickListener { lookupPlace() } }
+            add(searchButton, dp(104), dp(50))
         }
         top.addView(searchRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
         // The destination stays visible even if fresh GPS fixes overwrite the status line.
@@ -314,17 +323,17 @@ class MainActivity : Activity(), LocationListener {
             }
         }
         top.addView(destinationIndicator, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(7) })
-        banner = label("GPS buscando señal · mantené pulsado el mapa para elegir destino", 11f, muted)
+        banner = label(tr("gps"), 11f, muted)
         top.addView(banner, LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(8) })
 
         noteAccent = View(this).apply { setBackgroundColor(Color.parseColor(sky)) }
         noteBadge = label("PACENOTE", 11f, sky, true).apply {
             gravity = Gravity.CENTER_VERTICAL
         }
-        noteTitle = label("ELEGÍ UN DESTINO", 21f, white, true).apply {
+        noteTitle = label(tr("dest"), 21f, white, true).apply {
             setSingleLine(false)
         }
-        noteDetail = label("Se crearán las notas 1–6 automáticamente", 11.5f, muted).apply {
+        noteDetail = label(tr("dest_sub"), 11.5f, muted).apply {
             maxLines = 2
         }
         primaryNoteTile = RallyNoteTile(this).apply { visibility = View.GONE }
@@ -358,9 +367,10 @@ class MainActivity : Activity(), LocationListener {
         nextTurnDistance = row(7) {
             add(distanceNumber, -2, dp(51))
             add(distanceUnit, -2, dp(51))
-            add(label("HASTA LA PRÓXIMA CURVA", 10f, muted, true).apply {
+            nextCurveCaption = label(tr("next"), 10f, muted, true).apply {
                 gravity = Gravity.RIGHT or Gravity.CENTER_VERTICAL
-            }, 0, dp(48), 1f)
+            }
+            add(nextCurveCaption, 0, dp(48), 1f)
         }.apply {
             visibility = View.GONE
             setPadding(dp(3), dp(1), dp(3), dp(8))
@@ -386,7 +396,7 @@ class MainActivity : Activity(), LocationListener {
             addView(noteContent, LinearLayout.LayoutParams(0, -2, 1f))
         }
         top.addView(noteCard, LinearLayout.LayoutParams(-1,-2).apply { topMargin = dp(10) })
-        resetNoteCard(sky, "RALLY GPS AI", "ELEGÍ UN DESTINO", "Se crearán las notas 1–6 automáticamente")
+        resetNoteCard(sky, "RALLY GPS AI", tr("dest"), tr("dest_sub"))
 
         root.addView(top, FrameLayout.LayoutParams(-1,-2,Gravity.TOP).apply {
             setMargins(dp(9),dp(8),dp(9),0)
@@ -408,7 +418,7 @@ class MainActivity : Activity(), LocationListener {
         })
 
         val actionRow = row(8) {
-            action = button("TRAZAR RUTA", "#0E8BA1", "#FFFFFF").also { it.setOnClickListener { mainAction() } }
+            action = button(tr("route"), "#0E8BA1", "#FFFFFF").also { it.setOnClickListener { mainAction() } }
             add(action, 0, dp(52), 1.5f)
             nextButton = button("DEMO", "#463377", "#FFFFFF").also { it.setOnClickListener { startDemo() } }
             add(nextButton, 0, dp(52), 0.8f)
@@ -418,10 +428,12 @@ class MainActivity : Activity(), LocationListener {
         bottom.addView(actionRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(9) })
 
         toolsRow = row(6) {
-            add(button("PUNTOS").apply { setOnClickListener { showPointOptions() } }, 0,dp(46),1f)
+            pointsButton = button(tr("points")).apply { setOnClickListener { showPointOptions() } }
+            add(pointsButton, 0,dp(46),1f)
             add(button("GPX ↓").apply { setOnClickListener { importGpx() } }, 0,dp(46),1f)
             add(button("GPX ↑").apply { setOnClickListener { exportGpx() } }, 0,dp(46),1f)
-            add(button("AJUSTES").apply { setOnClickListener { showSettings() } },0,dp(46),1f)
+            settingsButton = button(tr("settings")).apply { setOnClickListener { showSettings() } }
+            add(settingsButton,0,dp(46),1f)
         }
         bottom.addView(toolsRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
         root.addView(bottom, FrameLayout.LayoutParams(-1,-2,Gravity.BOTTOM).apply {
