@@ -52,3 +52,18 @@ Cerrar la experiencia de navegación inspirada en Sideways y Rally SatNav: lectu
 - No se habilita navegación con pantalla bloqueada ni cartografía offline completa.
 - El arte incluye referencias visuales a un Subaru; si se publica comercialmente, revisar cualquier uso de marcas y logotipos.
 - **No activar CI, crear un PR que dispare CI, ni compilar hasta recibir una orden explícita del usuario.**
+
+
+## Nueva etapa: bienvenida, idioma y configuración inicial
+- [x] Mostrar una pantalla completa de bienvenida con el ícono oficial en la primera apertura.
+- [x] Preseleccionar según el idioma del dispositivo (es-AR, es-ES, en-US, pt-BR; español argentino como alternativa).
+- [x] Elegir idioma de interfaz principal y notas de copiloto.
+- [x] Configurar voz activada y Subaru azul o punto clásico antes de comenzar.
+- [x] Guardar la elección y no mostrar el asistente en cada apertura.
+- [x] Permitir reabrir la pantalla desde Ajustes > Idioma de la aplicación sin borrar la ruta.
+- [x] Usar voces CarlFM solo en español; para inglés/portugués, usar TTS del dispositivo en ese idioma.
+- [x] Añadir pruebas JUnit de idioma y mensajes de rally en `RallyLanguageTest.kt`.
+- [ ] Ejecutar JUnit, compilar la APK y probar el arranque en Android real (pospuestos a pedido del usuario).
+- [ ] Revisar mensajes secundarios heredados que todavía están en español.
+
+**Ver detalle:** `docs/INICIO_GUIADO_IDIOMAS.md`. **No se compiló ni fusionó a main.**
