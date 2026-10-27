@@ -86,6 +86,9 @@ class MainActivity : Activity(), LocationListener {
     private lateinit var noteBadge: TextView
     private lateinit var noteAccent: View
     private lateinit var noteCard: LinearLayout
+    private lateinit var nextTurnDistance: LinearLayout
+    private lateinit var distanceNumber: TextView
+    private lateinit var distanceUnit: TextView
     private lateinit var primaryNoteTile: RallyNoteTile
     private lateinit var linkedNoteTile: RallyNoteTile
     private lateinit var linkedNoteLabel: TextView
@@ -214,7 +217,11 @@ class MainActivity : Activity(), LocationListener {
 
     private fun updateNoteCard(note: PaceNote, next: PaceNote?, distanceMetres: Double) {
         val display = RallyNotePresentation.render(note, next, distanceMetres)
-        setNoteVisual(PaceNotes.color(display.grade), display.distanceLabel)
+        setNoteVisual(PaceNotes.color(display.grade), "NOTA DE RALLY")
+        nextTurnDistance.visibility = View.VISIBLE
+        distanceNumber.text = display.distanceValue
+        distanceNumber.textSize = if (display.distanceUnit.isEmpty()) 29f else 39f
+        distanceUnit.text = display.distanceUnit
         primaryNoteTile.visibility = View.VISIBLE
         primaryNoteTile.show(display.grade, display.side)
         noteTitle.text = display.headline
@@ -229,6 +236,7 @@ class MainActivity : Activity(), LocationListener {
 
     private fun resetNoteCard(tone: String, badge: String, headline: String, subline: String) {
         setNoteVisual(tone, badge)
+        nextTurnDistance.visibility = View.GONE
         primaryNoteTile.visibility = View.GONE
         linkedNoteColumn.visibility = View.GONE
         noteTitle.text = headline
@@ -303,13 +311,40 @@ class MainActivity : Activity(), LocationListener {
             addView(noteTitle, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(3) })
             addView(noteDetail, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4) })
         }
-        val noteContent = LinearLayout(this).apply {
+        // Large next-bend distance follows familiar navigation hierarchy: number first,
+        // unit secondary, pacenote directly underneath (instead of a thin text badge).
+        distanceNumber = label("0", 39f, white, true).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            includeFontPadding = false
+            setTypeface(Typeface.DEFAULT, Typeface.BOLD)
+        }
+        distanceUnit = label("m", 18f, muted, true).apply {
+            gravity = Gravity.BOTTOM
+            setPadding(0, 0, 0, dp(6))
+        }
+        nextTurnDistance = row(7) {
+            add(distanceNumber, -2, dp(51))
+            add(distanceUnit, -2, dp(51))
+            add(label("HASTA LA PRÓXIMA CURVA", 10f, muted, true).apply {
+                gravity = Gravity.RIGHT or Gravity.CENTER_VERTICAL
+            }, 0, dp(48), 1f)
+        }.apply {
+            visibility = View.GONE
+            setPadding(dp(3), dp(1), dp(3), dp(8))
+            contentDescription = "Distancia hasta la próxima curva"
+        }
+        val paceRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(10), dp(10), dp(10), dp(10))
             addView(primaryNoteTile, LinearLayout.LayoutParams(dp(78), dp(78)).apply { marginEnd = dp(10) })
             addView(noteWords, LinearLayout.LayoutParams(0, -2, 1f))
             addView(linkedNoteColumn, LinearLayout.LayoutParams(dp(66), -2).apply { marginStart = dp(6) })
+        }
+        val noteContent = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(10), dp(7), dp(10), dp(10))
+            addView(nextTurnDistance, LinearLayout.LayoutParams(-1, -2))
+            addView(paceRow, LinearLayout.LayoutParams(-1, -2))
         }
         noteCard = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
