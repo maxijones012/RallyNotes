@@ -257,10 +257,10 @@ class MainActivity : Activity(), LocationListener {
         }
         body.addView(voiceChoice, LinearLayout.LayoutParams(-1, -2).apply { topMargin=dp(18) })
         val autoChoice = CheckBox(this).apply {
-            text = "🚙  Subaru azul / Blue Subaru"
+            text = "🚙  Vehículo GPS / GPS vehicle"
             textSize = 15f
             setTextColor(Color.WHITE)
-            isChecked = prefs.getBoolean("subaru_marker", true)
+            isChecked = RallyVehicles.selectedId(prefs) != RallyVehicles.DOT
             buttonTintList = android.content.res.ColorStateList.valueOf(Color.parseColor(sky))
         }
         body.addView(autoChoice, LinearLayout.LayoutParams(-1, -2).apply { topMargin=dp(7) })
@@ -288,6 +288,10 @@ class MainActivity : Activity(), LocationListener {
                 .putBoolean(RallyLanguage.SETUP_KEY, true)
                 .putBoolean("voice", voiceOn)
                 .putBoolean("subaru_marker", autoChoice.isChecked)
+                .putString(RallyVehicles.KEY, if (autoChoice.isChecked) {
+                    val previously = RallyVehicles.selectedId(prefs)
+                    if (previously == RallyVehicles.DOT) RallyVehicles.DEFAULT else previously
+                } else RallyVehicles.DOT)
                 .apply()
             if (!RallyLanguage.isSpanish(appLanguage)) {
                 prefs.edit().putString("rally_voice_mode", RallyVoicePack.SYSTEM).apply()
@@ -1105,29 +1109,20 @@ class MainActivity : Activity(), LocationListener {
     }
 
     private fun drawPosition(p: GeoPoint) {
-        val s = map?.style ?: return
-        val f = Feature.fromGeometry(Point.fromLngLat(p.longitude,p.latitude))
-        val source = s.getSourceAs<GeoJsonSource>("rally_me")
+        val style = map?.style ?: return
+        val point = Feature.fromGeometry(Point.fromLngLat(p.longitude, p.latitude))
+        val source = style.getSourceAs<GeoJsonSource>("rally_me")
         if (source == null) {
-            s.addSource(GeoJsonSource("rally_me",f))
-            val car = SubaruMarker.bitmap()
-            // Always keep a classic dot as a selectable alternative and as a fallback.
-            s.addLayer(CircleLayer("rally_me_layer","rally_me").withProperties(
-                circleColor(sky), circleRadius(9f), circleStrokeColor("#FFFFFF"),
-                circleStrokeWidth(3f)))
-            if (car != null) {
-                s.addImage("rally_subaru_blue",car)
-                s.addLayer(SymbolLayer("rally_car_layer","rally_me").withProperties(
-                    iconImage("rally_subaru_blue"),
-                    iconSize(0.85f),
-                    iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_MAP),
-                    iconAllowOverlap(true),
-                    iconIgnorePlacement(true),
-                    iconRotate(carBearing(p))))
-            }
-            updateVehicleLayers()
-        } else source.setGeoJson(f)
-        s.getLayerAs<SymbolLayer>("rally_car_layer")?.setProperties(iconRotate(carBearing(p)))
+            style.addSource(GeoJsonSource("rally_me", point))
+            // Keep dot source in all cases: it is a valid alternative and a robust fallback.
+            style.addLayer(CircleLayer("rally_me_layer", "rally_me").withProperties(
+                circleColor(sky), circleRadius(9f),
+                circleStrokeColor("#FFFFFF"), circleStrokeWidth(3f)))
+        } else {
+            source.setGeoJson(point)
+        }
+        updateVehicleLayers()
+        style.getLayerAs<SymbolLayer>("rally_car_layer")?.setProperties(iconRotate(carBearing(p)))
         if ((navigating || demo) && followRouteCamera) {
             val route = plan ?: return
             val progressM = if (demo) demoPosition else navigator?.locate(p)?.metres ?: 0.0
@@ -1138,26 +1133,121 @@ class MainActivity : Activity(), LocationListener {
                 .zoom(pose.zoom).tilt(pose.tilt).bearing(pose.bearing).build()), if (demo) 430 else 650)
         }
     }
+
+    /**
+     * Switch map sprite in place. All bitmaps face geographic north before rotation,
+     * including the selected vehicle's thumbnail in the chooser.
+     */
     private fun updateVehicleLayers() {
         val style = map?.style ?: return
-        val hasCar = style.getLayer("rally_car_layer") != null
-        val showCar = hasCar && prefs.getBoolean("subaru_marker",true)
+        if (style.getSource("rally_me") == null) return
+        val selected = RallyVehicles.selectedId(prefs)
+        var activeCar = selected != RallyVehicles.DOT
+        if (activeCar) {
+            val bitmap = runCatching { RallyVehicles.marker(selected) }.getOrNull()
+            if (bitmap != null) {
+                val imageKey = "rally_vehicle_" + selected
+                style.addImage(imageKey, bitmap)
+                val size = if (selected == RallyVehicles.DEFAULT) 0.86f else 0.63f
+                val bearing = (if (demo) plan?.points?.getOrNull(positionIndex) else gps)
+                    ?.let { carBearing(it) } ?: 0f
+                val layer = style.getLayerAs<SymbolLayer>("rally_car_layer")
+                if (layer == null) {
+                    style.addLayer(SymbolLayer("rally_car_layer", "rally_me").withProperties(
+                        iconImage(imageKey),
+                        iconSize(size),
+                        iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_MAP),
+                        iconAllowOverlap(true), iconIgnorePlacement(true),
+                        iconRotate(bearing)))
+                } else {
+                    layer.setProperties(iconImage(imageKey), iconSize(size),
+                        iconRotate(bearing), visibility(Property.VISIBLE))
+                }
+            } else activeCar = false
+        }
         style.getLayer("rally_car_layer")?.setProperties(
-            visibility(if (showCar) Property.VISIBLE else Property.NONE))
+            visibility(if (activeCar) Property.VISIBLE else Property.NONE))
         style.getLayer("rally_me_layer")?.setProperties(
-            visibility(if (showCar) Property.NONE else Property.VISIBLE))
+            visibility(if (activeCar) Property.NONE else Property.VISIBLE))
     }
 
+    /** Real, scrollable, offline image gallery; selection persists across app restarts. */
     private fun selectVehicleMarker() {
-        val models = arrayOf("Subaru azul · rally", "Punto GPS clásico")
-        val chosen = if (prefs.getBoolean("subaru_marker",true)) 0 else 1
-        android.app.AlertDialog.Builder(this).setTitle("VEHÍCULO EN EL MAPA")
-            .setSingleChoiceItems(models,chosen) { dialog, selected ->
-                prefs.edit().putBoolean("subaru_marker",selected == 0).apply()
-                updateVehicleLayers()
-                status("Marcador elegido: ${models[selected]}",false)
-                dialog.dismiss()
-            }.setNegativeButton("CERRAR",null).show()
+        val selectedBefore = RallyVehicles.selectedId(prefs)
+        val scroll = ScrollView(this).apply {
+            isFillViewport = false
+            setBackgroundColor(Color.parseColor("#0D1524"))
+        }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(8), dp(12), dp(12))
+        }
+        val intro = label("Seleccioná tu vehículo para el mapa GPS y la DEMO.", 13f, muted)
+        content.addView(intro, LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(10) })
+        lateinit var dialog: android.app.AlertDialog
+        var lastGroup = ""
+        for (chunk in RallyVehicles.models.groupBy { it.group }) {
+            val groupName = chunk.key
+            if (groupName != lastGroup) {
+                content.addView(label(groupName.uppercase(Locale.ROOT), 12f, sky, true),
+                    LinearLayout.LayoutParams(-1,dp(32)))
+                lastGroup = groupName
+            }
+            for (rowModels in chunk.value.chunked(3)) {
+                val vehicleRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+                for (model in rowModels) {
+                    val active = model.id == selectedBefore
+                    val tile = LinearLayout(this).apply {
+                        orientation = LinearLayout.VERTICAL
+                        gravity = Gravity.CENTER_HORIZONTAL
+                        setPadding(dp(5), dp(7), dp(5), dp(7))
+                        background = shape(if (active) "#16364C" else "#172336", 10,
+                            if (active) "#22D3EE" else "#283F59")
+                        isClickable = true
+                        isFocusable = true
+                        contentDescription = model.name + if (active) ", seleccionado" else ""
+                    }
+                    val image = ImageView(this).apply {
+                        scaleType = ImageView.ScaleType.FIT_CENTER
+                        setImageBitmap(RallyVehicles.preview(model.id))
+                        contentDescription = model.name + ", vista superior"
+                    }
+                    tile.addView(image, LinearLayout.LayoutParams(dp(60), dp(76)))
+                    val text = label(model.name, 11f, white, true).apply {
+                        gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                        textAlignment = View.TEXT_ALIGNMENT_CENTER
+                        maxLines = 2
+                        ellipsize = android.text.TextUtils.TruncateAt.END
+                    }
+                    tile.addView(text, LinearLayout.LayoutParams(-1, dp(39)).apply { topMargin=dp(3) })
+                    tile.setOnClickListener {
+                        prefs.edit()
+                            .putString(RallyVehicles.KEY, model.id)
+                            .putBoolean("subaru_marker", model.id != RallyVehicles.DOT)
+                            .apply()
+                        updateVehicleLayers()
+                        status("Vehículo GPS: " + model.name, false)
+                        dialog.dismiss()
+                    }
+                    vehicleRow.addView(tile, LinearLayout.LayoutParams(0,dp(136),1f).apply {
+                        marginStart=dp(3); marginEnd=dp(3); bottomMargin=dp(7)
+                    })
+                }
+                repeat(3 - rowModels.size) {
+                    vehicleRow.addView(View(this), LinearLayout.LayoutParams(0,dp(136),1f))
+                }
+                content.addView(vehicleRow,LinearLayout.LayoutParams(-1,-2))
+            }
+        }
+        scroll.addView(content)
+        dialog = android.app.AlertDialog.Builder(this).setTitle("ELEGIR VEHÍCULO GPS")
+            .setView(scroll)
+            .setNegativeButton("CERRAR",null)
+            .create()
+        dialog.show()
+        dialog.window?.setLayout(
+            android.view.WindowManager.LayoutParams.MATCH_PARENT,
+            (resources.displayMetrics.heightPixels * 0.81f).toInt())
     }
 
     private fun drawLocation() { gps?.let { drawPosition(it) } }
