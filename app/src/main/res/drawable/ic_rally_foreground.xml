@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- Dark rally route + blue Subaru, based on the approved artwork. -->
+    <path android:fillColor="@android:color/transparent" android:strokeColor="#005DAB"
+        android:strokeWidth="15" android:strokeLineCap="round"
+        android:pathData="M19,92 C32,71 44,69 49,52 C53,37 63,36 77,35 C85,34 87,26 91,20"/>
+    <path android:fillColor="@android:color/transparent" android:strokeColor="#04D8EB"
+        android:strokeWidth="10" android:strokeLineCap="round"
+        android:pathData="M19,92 C32,71 44,69 49,52 C53,37 63,36 77,35 C85,34 87,26 91,20"/>
+    <path android:fillColor="@android:color/transparent" android:strokeColor="#B8FCFF"
+        android:strokeWidth="2" android:strokeLineCap="round"
+        android:pathData="M19,92 C32,71 44,69 49,52 C53,37 63,36 77,35 C85,34 87,26 91,20"/>
+    <!-- Rally car faces the road ahead, top-down -->
+    <group android:rotation="28" android:pivotX="47" android:pivotY="62">
+        <path android:fillColor="#021023" android:pathData="M33,36Q33,32 38,31L56,31Q61,32 61,36L63,83Q62,89 56,90L38,90Q32,89 31,83z"/>
+        <path android:fillColor="#087BF2" android:pathData="M36,34Q46,30 57,34L60,43L59,79L55,86L39,86L34,78L34,44z"/>
+        <path android:fillColor="#0549D8" android:pathData="M39,35L54,35L58,43L36,43z"/>
+        <path android:fillColor="#00BDF5" android:pathData="M35,45L39,46L38,76L34,76z M56,46L60,45L61,76L57,76z"/>
+        <path android:fillColor="#06213A" android:pathData="M38,48L55,48L57,57L37,57z M38,70L57,70L55,80L39,80z"/>
+        <path android:fillColor="#3B83A7" android:pathData="M40,49L53,49L55,53L38,53z"/>
+        <path android:fillColor="#FFD63C" android:pathData="M39,60L53,59L56,62L42,64z M39,66L47,66L50,68L40,70z"/>
+        <path android:fillColor="#F4F9FC" android:pathData="M36,36L42,35L43,38L36,40z M51,35L57,36L59,40L52,38z"/>
+        <path android:fillColor="#FF4254" android:pathData="M35,81L41,82L41,85L36,84z M53,82L59,81L58,84L53,85z"/>
+        <path android:fillColor="#061D4B" android:pathData="M33,79L61,79L63,82L31,82z"/>
+    </group>
+    <!-- Destination pin -->
+    <path android:fillColor="#FFFFFF" android:pathData="M91,11C83,11 78,17 78,25C78,33 91,47 91,47C91,47 104,33 104,25C104,17 98,11 91,11z"/>
+    <path android:fillColor="#02CDE7" android:pathData="M91,17A8,8 0,1 1,90.99 17z"/>
+</vector>
