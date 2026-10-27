@@ -314,7 +314,7 @@ class MainActivity : Activity(), LocationListener {
             if (firstRun) requestGps()
         }
         body.addView(begin, LinearLayout.LayoutParams(-1, dp(56)))
-        root.addView(body, ScrollView.LayoutParams(-1, -1))
+        root.addView(body, android.view.ViewGroup.LayoutParams(-1, -2))
         dialog.setContentView(root)
         dialog.show()
         dialog.window?.setLayout(android.view.WindowManager.LayoutParams.MATCH_PARENT,
