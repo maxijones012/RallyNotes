@@ -101,6 +101,8 @@ class RallyAudioPlayer(private val context: Context) {
         }
     }
 
+    fun isBusy(): Boolean = active
+
     fun stop() {
         generation++
         active = false
