@@ -70,6 +70,9 @@ class MainActivity : Activity(), LocationListener {
     private var voiceEngineSettingsOpened = false
     private var map3d = true
     private val drivingCamera = DrivingCamera()
+    // Avoid uploading image textures to MapLibre on every GPS fix (often 1 Hz).
+    private var vehicleImageStyle: Style? = null
+    private val vehicleImageKeys = mutableSetOf<String>()
     private var followRouteCamera = true
     private var voiceOn = true
     private var appLanguage = "es-AR"
@@ -1147,7 +1150,13 @@ class MainActivity : Activity(), LocationListener {
             val bitmap = runCatching { RallyVehicles.marker(selected) }.getOrNull()
             if (bitmap != null) {
                 val imageKey = "rally_vehicle_" + selected
-                style.addImage(imageKey, bitmap)
+                if (vehicleImageStyle !== style) {
+                    vehicleImageStyle = style
+                    vehicleImageKeys.clear()
+                }
+                if (vehicleImageKeys.add(imageKey)) {
+                    style.addImage(imageKey, bitmap)
+                }
                 val size = if (selected == RallyVehicles.DEFAULT) 0.86f else 0.63f
                 val bearing = (if (demo) plan?.points?.getOrNull(positionIndex) else gps)
                     ?.let { carBearing(it) } ?: 0f
