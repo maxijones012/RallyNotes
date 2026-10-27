@@ -81,3 +81,19 @@ Cerrar la experiencia de navegación inspirada en Sideways y Rally SatNav: lectu
 - [ ] Validar interrupciones, frecuencia y audibilidad en Motorola en pruebas seguras.
 
 **Documentación:** `docs/COPILOTO_CONTEXTUAL.md`. Esta etapa permanece en la rama, no fusionada a `main`.
+
+## Nueva etapa: galería de vehículos y marcador GPS
+
+- [x] Agregar 23 representaciones estilizadas de vehículos con vista superior y colores propios, además del círculo GPS clásico.
+- [x] Conservar el Subaru azul original como selección predeterminada.
+- [x] Añadir galería con miniaturas agrupadas (Rally, Calle, Pickup, 4x4, Especial, Clásico).
+- [x] Elegir desde Ajustes o desde la pantalla de bienvenida.
+- [x] Guardar y recuperar `vehicle_id` y conservar compatibilidad con `subaru_marker`.
+- [x] Girar el dibujo según el rumbo del GPS/DEMO y preservar la orientación en 3D.
+- [x] Evitar la recarga de texturas en cada actualización de posición.
+- [x] Agregar tests del catálogo y documentación técnica.
+- [ ] Compilar APK, ejecutar JUnit y validar miniaturas, giro, tamaño, rendimiento y persistencia en el Motorola.
+
+**Importante:** las miniaturas se dibujan con Canvas y son ilustraciones originales estilizadas, no fotos ni modelos 3D fotorrealistas.
+
+Ver `docs/GALERIA_VEHICULOS_GPS.md`. Sigue pendiente la compilación, por indicación del usuario.
