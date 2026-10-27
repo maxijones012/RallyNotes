@@ -79,6 +79,9 @@ class MainActivity : Activity(), LocationListener {
     private var currentNote = 0
     private var lastNoteDistanceM = 0.0
     private var lastRemainingMetres = 0.0
+    private val contextualCopilot = ContextCopilot()
+    private var lastPriorityNoteAtMs = -1L
+    private var contextualCommentIndex = 0
     private var firstGpsCamera = true
     private var demoPosition = 0.0
     private var demoSpeed = 55.0 / 3.6
@@ -664,6 +667,7 @@ class MainActivity : Activity(), LocationListener {
             navigationSession++
             reroutePolicy.reset()
             navigating = false; demo = false; tts?.stop(); rallyAudio.stop(); lastSpoken = -1
+            contextualCopilot.reset(); lastPriorityNoteAtMs = -1L
             showDrivingControls(true)
             action.text = tr("go"); nextButton.text = "DEMO"
             resetNoteCard("#F0475A", "STOP", "NAVEGACIÓN DETENIDA", "Podés retomar el recorrido o trazar uno nuevo")
@@ -701,6 +705,7 @@ class MainActivity : Activity(), LocationListener {
         updateDestinationIndicator()
         if (save) prefs.edit().remove("last_road_destination").remove("last_road_stops").apply()
         plan = parsed; navigator = NavigationEngine(parsed) { warnFactor }; drivingCamera.reset()
+        contextualCopilot.reset(); lastPriorityNoteAtMs = -1L
         positionIndex = 0; lastSpoken = -1; currentNote = 0
         navigating = false; demo = false; demoPosition = 0.0
         action.text = tr("go"); nextButton.text = "DEMO"
@@ -723,6 +728,7 @@ class MainActivity : Activity(), LocationListener {
         reroutePolicy.reset()
         navigating = true; demo = false; positionIndex = 0; lastSpoken = -1; currentNote = 0
         navigator?.reset(); drivingCamera.reset(); followRouteCamera = true; showDrivingControls(false)
+        contextualCopilot.reset(); lastPriorityNoteAtMs = -1L
         action.text = tr("finish"); nextButton.text = "DEMO"
         status("GPS activo · notas estimadas del trazado · respetá la señalización", false)
         lastLocation?.let {
@@ -731,7 +737,7 @@ class MainActivity : Activity(), LocationListener {
         }
     }
     private fun startDemo() {
-        if (demo) { demo=false; nextButton.text="DEMO"; action.text=tr("go"); showDrivingControls(true); return }
+        if (demo) { demo=false; contextualCopilot.reset(); nextButton.text="DEMO"; action.text=tr("go"); showDrivingControls(true); return }
         if (plan == null) {
             val center = gps ?: GeoPoint(-43.249, -65.309)
             setPlan(PaceNotes.synthetic(center), false)
@@ -741,6 +747,7 @@ class MainActivity : Activity(), LocationListener {
         reroutePolicy.reset()
         demo = true; navigating = false; demoPosition = 0.0; positionIndex=0; lastSpoken=-1
         navigator?.reset(); drivingCamera.reset(); followRouteCamera = true; showDrivingControls(false)
+        contextualCopilot.reset(); lastPriorityNoteAtMs = -1L
         action.text = tr("finish"); nextButton.text=tr("pause")
         val tick = object : Runnable {
             override fun run() {
@@ -789,6 +796,7 @@ class MainActivity : Activity(), LocationListener {
             val follow = route.notes.getOrNull(result.noteIndex+1)
             updateNoteCard(next, follow, result.distanceToNoteM)
         }
+        if (result.announcement != null) lastPriorityNoteAtMs = now
         result.announcement?.let { message ->
             if (result.noteIndex >= 0 && !result.arrived) {
                 lastSpoken = result.noteIndex
@@ -799,8 +807,24 @@ class MainActivity : Activity(), LocationListener {
                 } else say(message)
             } else say(message)
         }
+        // A contextual observation never competes with an imminent turn call.
+        // No camera, model downloads or network calls: pure precomputed route geometry.
+        if (!result.arrived && result.announcement == null && voiceOn && speakReady &&
+            (lastPriorityNoteAtMs < 0 || now - lastPriorityNoteAtMs >= 18_000L) &&
+            tts?.isSpeaking != true && !rallyAudio.isBusy() && !reroutePolicy.isBusy()) {
+            val mode = ContextMode.fromId(prefs.getString("context_commentary_mode", ContextMode.OCCASIONAL.id))
+            val cue = contextualCopilot.evaluate(
+                route, result.fix.metres, speed.toDouble(), now, mode,
+                result.distanceToNoteM, priorityBusy = false
+            )
+            if (cue != null) {
+                contextualCommentIndex++
+                say(RallyLanguage.contextComment(appLanguage, cue, contextualCommentIndex))
+            }
+        }
         if (result.arrived) {
             navigationSession++
+            contextualCopilot.reset()
             reroutePolicy.reset()
             navigating = false; demo = false; action.text = tr("go")
             showDrivingControls(true)
@@ -827,6 +851,7 @@ class MainActivity : Activity(), LocationListener {
                     if (session == navigationSession && navigating && !demo && routeDestination == destination && plan === oldPlan) {
                         plan = updated
                         navigator = NavigationEngine(updated) { warnFactor }
+                        contextualCopilot.reset(); lastPriorityNoteAtMs = -1L
                         drivingCamera.reset()
                         lastSpoken = -1
                         pendingStops = stopsAhead
