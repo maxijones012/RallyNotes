@@ -28,6 +28,7 @@ import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.Style
 import org.maplibre.android.style.layers.CircleLayer
+import org.maplibre.android.style.layers.Property
 import org.maplibre.android.style.layers.SymbolLayer
 import org.maplibre.android.style.layers.LineLayer
 import org.maplibre.android.style.layers.PropertyFactory.*
@@ -139,7 +140,11 @@ class MainActivity : Activity(), LocationListener {
                             status("Parada ${intermediatePoints.size} agregada", false)
                         } else status("Máximo de cuatro paradas", true)
                     }
-                    else -> { target = point; status("Destino señalado. Tocá TRAZAR RUTA", false) }
+                    else -> {
+                        target = point
+                        status("DESTINO SELECCIONADO · tocá TRAZAR RUTA", false)
+                        Toast.makeText(this, "Destino marcado en el mapa", Toast.LENGTH_SHORT).show()
+                    }
                 }
                 mapSelectMode = 0
                 drawWaypoints()
@@ -824,15 +829,45 @@ class MainActivity : Activity(), LocationListener {
                 textHaloColor("#111827"), textHaloWidth(2f), textOffset(arrayOf(0f, -1.8f))))
         } else source.setGeoJson(features)
     }
+    /**
+     * Real-position map marker: the Subaru's hood always points in the actual driving
+     * direction (route tangent in DEMO, reliable GPS heading otherwise).
+     */
+    private fun carBearing(point: GeoPoint): Float {
+        val route = plan
+        if ((navigating || demo) && route != null && route.points.size >= 2) {
+            val metres = if (demo) demoPosition else navigator?.locate(point)?.metres ?: 0.0
+            val a = DrivingCamera.pointAt(route, (metres - 4.0).coerceAtLeast(0.0))
+            val b = DrivingCamera.pointAt(route, (metres + 20.0).coerceAtMost(route.totalMetres))
+            if (DrivingCamera.distance(a,b) >= 1.0) return DrivingCamera.bearing(a,b).toFloat()
+        }
+        return if (lastLocation?.hasBearing() == true) lastLocation!!.bearing else 0f
+    }
+
     private fun drawPosition(p: GeoPoint) {
         val s = map?.style ?: return
         val f = Feature.fromGeometry(Point.fromLngLat(p.longitude,p.latitude))
         val source = s.getSourceAs<GeoJsonSource>("rally_me")
         if (source == null) {
             s.addSource(GeoJsonSource("rally_me",f))
-            s.addLayer(CircleLayer("rally_me_layer","rally_me").withProperties(
-                circleColor(sky),circleRadius(9f),circleStrokeColor("#FFFFFF"),circleStrokeWidth(3f)))
+            val car = SubaruMarker.bitmap()
+            if (car != null) {
+                s.addImage("rally_subaru_blue", car)
+                s.addLayer(SymbolLayer("rally_car_layer","rally_me").withProperties(
+                    iconImage("rally_subaru_blue"),
+                    iconSize(0.72f),
+                    iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_MAP),
+                    iconAllowOverlap(true),
+                    iconIgnorePlacement(true),
+                    iconRotate(carBearing(p))))
+            } else {
+                // Graceful fallback if the sprite cannot be decoded.
+                s.addLayer(CircleLayer("rally_me_layer","rally_me").withProperties(
+                    circleColor(sky), circleRadius(9f), circleStrokeColor("#FFFFFF"),
+                    circleStrokeWidth(3f)))
+            }
         } else source.setGeoJson(f)
+        s.getLayerAs<SymbolLayer>("rally_car_layer")?.setProperties(iconRotate(carBearing(p)))
         if ((navigating || demo) && followRouteCamera) {
             val route = plan ?: return
             val progressM = if (demo) demoPosition else navigator?.locate(p)?.metres ?: 0.0
@@ -842,7 +877,6 @@ class MainActivity : Activity(), LocationListener {
                 .target(LatLng(pose.focus.latitude, pose.focus.longitude))
                 .zoom(pose.zoom).tilt(pose.tilt).bearing(pose.bearing).build()), if (demo) 430 else 650)
         }
-
     }
     private fun drawLocation() { gps?.let { drawPosition(it) } }
     private fun toggle3D() {
