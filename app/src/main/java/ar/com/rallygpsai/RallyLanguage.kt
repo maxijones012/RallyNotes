@@ -41,7 +41,10 @@ object RallyLanguage {
         "vehicle" to "Elegir vehículo del GPS", "destination_point" to "Señalar destino en mapa",
         "origin_point" to "Señalar origen en mapa", "via_point" to "Agregar parada intermedia",
         "gps_origin" to "Usar GPS como origen", "clear_stops" to "Borrar todas las paradas",
-        "points_title" to "ORIGEN · DESTINO · PARADAS"
+        "points_title" to "ORIGEN · DESTINO · PARADAS",
+        "context_menu" to "Copiloto contextual", "context_off" to "Desactivado · solo notas",
+        "context_occasional" to "Ocasional · cada 3–5 min",
+        "context_talkative" to "Conversador · cada 1–2 min"
     )
     private val en = mapOf(
         "welcome" to "Welcome to Rally GPS AI!", "select" to "Choose your navigation and co-driver language.",
@@ -66,7 +69,10 @@ object RallyLanguage {
         "vehicle" to "Choose GPS vehicle", "destination_point" to "Select destination on map",
         "origin_point" to "Select origin on map", "via_point" to "Add intermediate stop",
         "gps_origin" to "Use GPS as origin", "clear_stops" to "Clear all stops",
-        "points_title" to "ORIGIN · DESTINATION · STOPS"
+        "points_title" to "ORIGIN · DESTINATION · STOPS",
+        "context_menu" to "Contextual co-driver", "context_off" to "Off · pace notes only",
+        "context_occasional" to "Occasional · every 3–5 min",
+        "context_talkative" to "Talkative · every 1–2 min"
     )
     private val pt = mapOf(
         "welcome" to "Bem-vindo ao Rally GPS AI!", "select" to "Escolha o idioma da navegação e do copiloto.",
@@ -91,13 +97,56 @@ object RallyLanguage {
         "vehicle" to "Escolher veículo do GPS", "destination_point" to "Selecionar destino no mapa",
         "origin_point" to "Selecionar origem no mapa", "via_point" to "Adicionar parada",
         "gps_origin" to "Usar GPS como origem", "clear_stops" to "Limpar paradas",
-        "points_title" to "ORIGEM · DESTINO · PARADAS"
+        "points_title" to "ORIGEM · DESTINO · PARADAS",
+        "context_menu" to "Copiloto contextual", "context_off" to "Desativado · apenas notas",
+        "context_occasional" to "Ocasional · a cada 3–5 min",
+        "context_talkative" to "Conversador · a cada 1–2 min"
     )
     fun text(code: String, key: String): String = when {
         normalized(code).startsWith("en") -> en[key]
         normalized(code).startsWith("pt") -> pt[key]
         else -> es[key]
     } ?: es[key] ?: key
+    /** Safe claims only: these describe mapped curves, never the actual road surface. */
+    fun contextComment(code: String, cue: ContextCue, variation: Int = 0): String {
+        val variant = if (variation % 2 == 0) 0 else 1
+        return when {
+            normalized(code).startsWith("en") -> when (cue.kind) {
+                ContextKind.WINDING -> if (variant == 0)
+                    "The mapped route ahead has several bends. Pay attention to the road."
+                    else "Several changes of direction are coming up on the mapped route."
+                ContextKind.LINKED -> if (variant == 0)
+                    "The map shows a sequence of linked bends ahead."
+                    else "A couple of consecutive bends are coming up."
+                ContextKind.STRAIGHT -> if (variant == 0)
+                    "The route looks straighter for a while after those bends."
+                    else "The next mapped section is relatively straight."
+            }
+            normalized(code).startsWith("pt") -> when (cue.kind) {
+                ContextKind.WINDING -> if (variant == 0)
+                    "O mapa indica várias curvas à frente. Preste atenção à estrada."
+                    else "O traçado à frente tem várias mudanças de direção."
+                ContextKind.LINKED -> if (variant == 0)
+                    "O mapa mostra uma sequência de curvas ligadas à frente."
+                    else "Vêm aí algumas curvas consecutivas."
+                ContextKind.STRAIGHT -> if (variant == 0)
+                    "Depois dessas curvas, o traçado fica mais reto por um tempo."
+                    else "O próximo trecho no mapa é relativamente reto."
+            }
+            else -> when (cue.kind) {
+                ContextKind.WINDING -> if (variant == 0)
+                    "Se viene un tramo con varias curvas seguidas, prestá atención al camino."
+                    else "Según el mapa, se acercan varios cambios de dirección."
+                ContextKind.LINKED -> if (variant == 0)
+                    "Más adelante hay una serie de curvas enlazadas."
+                    else "El trazado marca varias curvas consecutivas."
+                ContextKind.STRAIGHT -> if (variant == 0)
+                    "Después de esas curvas, el trazado viene bastante más recto."
+                    else "Según el mapa, ahora sigue un tramo relativamente recto."
+            }
+        }
+    }
+
     fun call(code: String, note: PaceNote, next: PaceNote? = null): String {
         if (isSpanish(code)) return PaceNotes.phrase(note, next)
         val l = normalized(code)
