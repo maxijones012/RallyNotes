@@ -56,6 +56,8 @@ class MainActivity : Activity(), LocationListener {
     private val intermediatePoints = mutableListOf<GeoPoint>()
     private var mapSelectMode = 0 // 0 destino, 1 origen, 2 parada
     private var destinationTapArmed = false // activado sólo desde PUNTOS → señalar destino
+    private var chosenDestinationText = "PUNTO MARCADO"
+    private var chosenDestinationApproximate = false
     private var navigator: NavigationEngine? = null
     private var controlsVisible = false
     private lateinit var locationManager: LocationManager
@@ -428,17 +430,18 @@ class MainActivity : Activity(), LocationListener {
         setContentView(root)
     }
 
-    private fun updateDestinationIndicator(summary: String? = null, approximate: Boolean = false) {
+    private fun updateDestinationIndicator(summary: String? = null, approximate: Boolean? = null) {
+        if (summary != null) chosenDestinationText = summary.take(45).ifBlank { "PUNTO MARCADO" }
+        if (approximate != null) chosenDestinationApproximate = approximate
         val point = target ?: routeDestination
         if (point == null) {
             destinationIndicator.visibility = View.GONE
             return
         }
         destinationIndicator.visibility = if ((navigating || demo) && !controlsVisible) View.GONE else View.VISIBLE
-        val suffix = if (approximate) " · APROXIMADO" else ""
-        val name = summary?.take(45)?.takeIf { it.isNotBlank() } ?: "PUNTO MARCADO"
-        destinationIndicator.text = "✓ DESTINO: $name$suffix  ·  TOCÁ PARA VER"
-        destinationIndicator.setTextColor(Color.parseColor(if (approximate) "#FFE49D" else "#ADFFE0"))
+        val suffix = if (chosenDestinationApproximate) " · APROXIMADO" else ""
+        destinationIndicator.text = "✓ DESTINO: $chosenDestinationText$suffix  ·  TOCÁ PARA VER"
+        destinationIndicator.setTextColor(Color.parseColor(if (chosenDestinationApproximate) "#FFE49D" else "#ADFFE0"))
     }
 
     private fun chooseDestination(point: GeoPoint, name: String, approximate: Boolean = false) {
