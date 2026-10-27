@@ -35,7 +35,7 @@ class RallyNoteTile(context: Context) : View(context) {
         backgroundRect.set(0f, 0f, w, h)
         ink.style = Paint.Style.FILL
         ink.color = tone
-        canvas.drawRoundRect(backgroundRect, s * 0.12f, s * 0.12f, ink)
+        canvas.drawRoundRect(backgroundRect, s * 0.055f, s * 0.055f, ink)
 
         // Pacenote pictogram: curved route, arrow toward left/right at its exit.
         val mirror = if (side == PaceNote.Side.LEFT) -1f else 1f
@@ -51,7 +51,7 @@ class RallyNoteTile(context: Context) : View(context) {
         ink.style = Paint.Style.STROKE
         ink.strokeCap = Paint.Cap.ROUND
         ink.strokeJoin = Paint.Join.ROUND
-        ink.strokeWidth = s * 0.080f
+        ink.strokeWidth = s * 0.09f
         ink.color = foreground
         canvas.drawPath(arc, ink)
         val head = Path().apply {
@@ -62,7 +62,7 @@ class RallyNoteTile(context: Context) : View(context) {
         canvas.drawPath(head, ink)
         ink.style = Paint.Style.FILL
         ink.typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
-        ink.textSize = s * 0.49f
+        ink.textSize = s * 0.54f
         ink.textAlign = Paint.Align.CENTER
         val font = ink.fontMetrics
         val baseline = h * 0.68f - (font.ascent + font.descent) / 2f
