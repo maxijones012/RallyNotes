@@ -193,6 +193,131 @@ class MainActivity : Activity(), LocationListener {
         else showWelcomeSetup(firstRun = true)
     }
 
+    /** Full-screen first-use setup; can be reopened from Settings without deleting routes. */
+    private fun showWelcomeSetup(firstRun: Boolean) {
+        val dialog = android.app.Dialog(this)
+        dialog.setCancelable(!firstRun)
+        dialog.window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.parseColor("#090F1B")))
+        val root = ScrollView(this).apply {
+            isFillViewport = true
+            setBackgroundColor(Color.parseColor("#090F1B"))
+        }
+        val body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(26), dp(24), dp(26), dp(28))
+        }
+        val iconView = ImageView(this).apply {
+            setImageResource(R.mipmap.ic_launcher)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            contentDescription = "Rally GPS AI"
+        }
+        body.addView(iconView, LinearLayout.LayoutParams(dp(105), dp(105)).apply {
+            gravity = Gravity.CENTER_HORIZONTAL
+            bottomMargin = dp(22)
+        })
+        val title = label(tr("welcome"), 26f, white, true).apply {
+            gravity = Gravity.CENTER
+            textAlignment = View.TEXT_ALIGNMENT_CENTER
+        }
+        val subtitle = label(tr("select"), 15f, muted).apply {
+            gravity = Gravity.CENTER
+            textAlignment = View.TEXT_ALIGNMENT_CENTER
+        }
+        body.addView(title, LinearLayout.LayoutParams(-1, -2))
+        body.addView(subtitle, LinearLayout.LayoutParams(-1, -2).apply { topMargin=dp(9); bottomMargin=dp(22) })
+        val heading = label(tr("language"), 12f, sky, true)
+        body.addView(heading)
+        val options = RadioGroup(this).apply { orientation = RadioGroup.VERTICAL }
+        var selectedLanguage = appLanguage
+        RallyLanguage.names.forEachIndexed { index, name ->
+            val choice = RadioButton(this).apply {
+                id = View.generateViewId()
+                text = name
+                textSize = 16f
+                setTextColor(Color.WHITE)
+                buttonTintList = android.content.res.ColorStateList.valueOf(Color.parseColor(sky))
+                setPadding(dp(8), dp(8), dp(8), dp(8))
+                isChecked = RallyLanguage.codes[index] == selectedLanguage
+            }
+            choice.setOnClickListener {
+                selectedLanguage = RallyLanguage.codes[index]
+                title.text = RallyLanguage.text(selectedLanguage, "welcome")
+                subtitle.text = RallyLanguage.text(selectedLanguage, "select")
+                heading.text = RallyLanguage.text(selectedLanguage, "language")
+            }
+            options.addView(choice, RadioGroup.LayoutParams(-1, dp(51)))
+        }
+        body.addView(options, LinearLayout.LayoutParams(-1, -2))
+        val voiceChoice = CheckBox(this).apply {
+            text = "🔊  Copiloto / Co-driver"
+            textSize = 15f
+            setTextColor(Color.WHITE)
+            isChecked = voiceOn
+            buttonTintList = android.content.res.ColorStateList.valueOf(Color.parseColor(sky))
+        }
+        body.addView(voiceChoice, LinearLayout.LayoutParams(-1, -2).apply { topMargin=dp(18) })
+        val autoChoice = CheckBox(this).apply {
+            text = "🚙  Subaru azul / Blue Subaru"
+            textSize = 15f
+            setTextColor(Color.WHITE)
+            isChecked = prefs.getBoolean("subaru_marker", true)
+            buttonTintList = android.content.res.ColorStateList.valueOf(Color.parseColor(sky))
+        }
+        body.addView(autoChoice, LinearLayout.LayoutParams(-1, -2).apply { topMargin=dp(7) })
+        val caution = label(RallyLanguage.text(selectedLanguage, "voice_hint"), 12f, muted)
+        body.addView(caution, LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(16); bottomMargin=dp(20) })
+        val begin = button(RallyLanguage.text(selectedLanguage, "start"), "#0E8BA1", "#FFFFFF")
+        begin.textSize = 17f
+        begin.setOnClickListener {
+            val oldLanguage = appLanguage
+            appLanguage = RallyLanguage.normalized(selectedLanguage)
+            voiceOn = voiceChoice.isChecked
+            prefs.edit()
+                .putString(RallyLanguage.KEY, appLanguage)
+                .putBoolean(RallyLanguage.SETUP_KEY, true)
+                .putBoolean("voice", voiceOn)
+                .putBoolean("subaru_marker", autoChoice.isChecked)
+                .apply()
+            if (!RallyLanguage.isSpanish(appLanguage)) {
+                prefs.edit().putString("rally_voice_mode", RallyVoicePack.SYSTEM).apply()
+            }
+            if (oldLanguage != appLanguage) initializeVoiceEngine()
+            updateVehicleLayers()
+            refreshLanguageUi()
+            dialog.dismiss()
+            if (firstRun) requestGps()
+        }
+        body.addView(begin, LinearLayout.LayoutParams(-1, dp(56)))
+        root.addView(body, ScrollView.LayoutParams(-1, -1))
+        dialog.setContentView(root)
+        dialog.show()
+        dialog.window?.setLayout(android.view.WindowManager.LayoutParams.MATCH_PARENT,
+            android.view.WindowManager.LayoutParams.MATCH_PARENT)
+    }
+
+    /** The existing map/route session stays in memory when changing the language. */
+    private fun refreshLanguageUi() {
+        if (!::searchInput.isInitialized) return
+        searchInput.hint = tr("search_hint")
+        searchButton.text = tr("search")
+        voiceButton.text = if (voiceOn) tr("voice_on") else tr("voice_off")
+        pointsButton.text = tr("points")
+        settingsButton.text = tr("settings")
+        nextCurveCaption.text = tr("next")
+        action.text = when {
+            navigating || demo -> tr("finish")
+            plan != null && target == null -> tr("go")
+            else -> tr("route")
+        }
+        if (demo) nextButton.text = tr("pause")
+        if (plan == null) resetNoteCard(sky, "RALLY GPS AI", tr("dest"), tr("dest_sub"))
+        else {
+            val shownNote = plan?.notes?.getOrNull(currentNote)
+            if (shownNote != null && (navigating || demo)) updateNoteCard(shownNote, plan?.notes?.getOrNull(currentNote+1), 0.0)
+        }
+        status(tr("gps"), false)
+    }
     private fun dp(value: Int) = (resources.displayMetrics.density * value + 0.5f).toInt()
     private fun systemBarInset(name: String): Int {
         val id = resources.getIdentifier(name, "dimen", "android")
