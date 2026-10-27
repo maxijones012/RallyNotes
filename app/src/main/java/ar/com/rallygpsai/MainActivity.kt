@@ -810,6 +810,7 @@ class MainActivity : Activity(), LocationListener {
         // A contextual observation never competes with an imminent turn call.
         // No camera, model downloads or network calls: pure precomputed route geometry.
         if (!result.arrived && result.announcement == null && voiceOn && speakReady &&
+            (demo || accuracy <= 25f) &&
             (lastPriorityNoteAtMs < 0 || now - lastPriorityNoteAtMs >= 18_000L) &&
             tts?.isSpeaking != true && !rallyAudio.isBusy() && !reroutePolicy.isBusy()) {
             val mode = ContextMode.fromId(prefs.getString("context_commentary_mode", ContextMode.OCCASIONAL.id))
