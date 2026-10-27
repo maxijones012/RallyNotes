@@ -1230,9 +1230,9 @@ class MainActivity : Activity(), LocationListener {
         }
     }
     private fun showPointOptions() {
-        val choices = arrayOf("Señalar destino en mapa", "Señalar origen en mapa", "Agregar parada intermedia",
-            "Usar GPS como origen", "Borrar todas las paradas")
-        android.app.AlertDialog.Builder(this).setTitle("ORIGEN · DESTINO · PARADAS")
+        val choices = arrayOf(tr("destination_point"), tr("origin_point"), tr("via_point"),
+            tr("gps_origin"), tr("clear_stops"))
+        android.app.AlertDialog.Builder(this).setTitle(tr("points_title"))
             .setItems(choices) { _, index ->
                 when (index) {
                     0, 1, 2 -> {
@@ -1254,8 +1254,10 @@ class MainActivity : Activity(), LocationListener {
     }
 
     private fun showSettings() {
-        val names=arrayOf("Aviso corto (4 s)","Aviso normal (7 s)","Aviso anticipado (10 s)",
-            "Volver a escuchar una nota", "Mostrar notas completas", "Elegir voz de copiloto", "Probar voz de rally", "Elegir voz TTS Android", "Velocidad y tono TTS", "Instalar/cambiar motor TTS", "Licencias de voz", "Elegir vehículo del GPS", tr("change"))
+        val names=arrayOf(tr("warn_short"), tr("warn_normal"), tr("warn_early"),
+            tr("repeat"), tr("all_notes"), tr("copilot"), tr("test_voice"),
+            tr("android_voice"), tr("pitch"), tr("engine"), tr("licenses"),
+            tr("vehicle"), tr("change"))
         android.app.AlertDialog.Builder(this).setTitle("COPILOTO · " + tr("settings"))
             .setItems(names) { _, i ->
                 if(i in 0..2) { warnFactor=i; prefs.edit().putInt("anticipation",i).apply();status("Anticipación: ${names[i]}",false) }
