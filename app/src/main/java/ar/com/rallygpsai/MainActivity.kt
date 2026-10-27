@@ -77,6 +77,8 @@ class MainActivity : Activity(), LocationListener {
     private var positionIndex = 0
     private var lastSpoken = -1
     private var currentNote = 0
+    private var lastNoteDistanceM = 0.0
+    private var lastRemainingMetres = 0.0
     private var firstGpsCamera = true
     private var demoPosition = 0.0
     private var demoSpeed = 55.0 / 3.6
@@ -311,10 +313,11 @@ class MainActivity : Activity(), LocationListener {
             else -> tr("route")
         }
         if (demo) nextButton.text = tr("pause")
+        tripDistance.text = RallyDistanceFormatter.remaining(lastRemainingMetres) + " " + tr("remaining")
         if (plan == null) resetNoteCard(sky, "RALLY GPS AI", tr("dest"), tr("dest_sub"))
         else {
             val shownNote = plan?.notes?.getOrNull(currentNote)
-            if (shownNote != null && (navigating || demo)) updateNoteCard(shownNote, plan?.notes?.getOrNull(currentNote+1), 0.0)
+            if (shownNote != null && (navigating || demo)) updateNoteCard(shownNote, plan?.notes?.getOrNull(currentNote+1), lastNoteDistanceM)
         }
         status(tr("gps"), false)
     }
@@ -367,6 +370,7 @@ class MainActivity : Activity(), LocationListener {
     }
 
     private fun updateNoteCard(note: PaceNote, next: PaceNote?, distanceMetres: Double) {
+        lastNoteDistanceM = distanceMetres
         val display = RallyNotePresentation.render(note, next, distanceMetres)
         setNoteVisual(PaceNotes.color(display.grade), tr("note"))
         nextTurnDistance.visibility = View.VISIBLE
@@ -656,7 +660,7 @@ class MainActivity : Activity(), LocationListener {
             reroutePolicy.reset()
             navigating = false; demo = false; tts?.stop(); rallyAudio.stop(); lastSpoken = -1
             showDrivingControls(true)
-            action.text = "INICIAR GPS"; nextButton.text = "DEMO"
+            action.text = tr("go"); nextButton.text = "DEMO"
             resetNoteCard("#F0475A", "STOP", "NAVEGACIÓN DETENIDA", "Podés retomar el recorrido o trazar uno nuevo")
             status("Recorrido guardado. Podés retomarlo.", false)
             return
@@ -694,12 +698,13 @@ class MainActivity : Activity(), LocationListener {
         plan = parsed; navigator = NavigationEngine(parsed) { warnFactor }; drivingCamera.reset()
         positionIndex = 0; lastSpoken = -1; currentNote = 0
         navigating = false; demo = false; demoPosition = 0.0
-        action.text = "INICIAR GPS"; nextButton.text = "DEMO"
+        action.text = tr("go"); nextButton.text = "DEMO"
         showDrivingControls(false)
         val km = "%.1f".format(Locale.US, parsed.totalMetres / 1000.0)
         resetNoteCard("#22D3EE", "RUTA LISTA", "${parsed.notes.size} NOTAS DETECTADAS", "${km} KM  ·  REVISÁ LAS NOTAS ANTES DE SALIR")
         info.text = "${parsed.notes.size} NOTAS · 1–6"
-        tripDistance.text = "$km km restantes"
+        lastRemainingMetres = parsed.totalMetres
+        tripDistance.text = "$km km " + tr("remaining")
         drawPlan()
         if (save && parsed.points.size <= 30000) prefs.edit().putString("last_route", RouteStore.serialize(parsed.points)).apply()
         val center = parsed.points[parsed.points.size/2]
@@ -713,7 +718,7 @@ class MainActivity : Activity(), LocationListener {
         reroutePolicy.reset()
         navigating = true; demo = false; positionIndex = 0; lastSpoken = -1; currentNote = 0
         navigator?.reset(); drivingCamera.reset(); followRouteCamera = true; showDrivingControls(false)
-        action.text = "FINALIZAR"; nextButton.text = "DEMO"
+        action.text = tr("finish"); nextButton.text = "DEMO"
         status("GPS activo · notas estimadas del trazado · respetá la señalización", false)
         lastLocation?.let {
             updateProgress(GeoPoint(it.latitude,it.longitude), it.speed)
@@ -721,7 +726,7 @@ class MainActivity : Activity(), LocationListener {
         }
     }
     private fun startDemo() {
-        if (demo) { demo=false; nextButton.text="DEMO"; action.text="INICIAR GPS"; showDrivingControls(true); return }
+        if (demo) { demo=false; nextButton.text="DEMO"; action.text=tr("go"); showDrivingControls(true); return }
         if (plan == null) {
             val center = gps ?: GeoPoint(-43.249, -65.309)
             setPlan(PaceNotes.synthetic(center), false)
@@ -731,7 +736,7 @@ class MainActivity : Activity(), LocationListener {
         reroutePolicy.reset()
         demo = true; navigating = false; demoPosition = 0.0; positionIndex=0; lastSpoken=-1
         navigator?.reset(); drivingCamera.reset(); followRouteCamera = true; showDrivingControls(false)
-        action.text = "FINALIZAR"; nextButton.text="PAUSA"
+        action.text = tr("finish"); nextButton.text=tr("pause")
         val tick = object : Runnable {
             override fun run() {
                 if (!demo) return
@@ -742,7 +747,7 @@ class MainActivity : Activity(), LocationListener {
                 val point = p.points[index]
                 updateProgress(point, demoSpeed.toFloat())
                 drawPosition(point)
-                if (index >= p.points.lastIndex) { demo=false; action.text="INICIAR GPS"; nextButton.text="DEMO"; showDrivingControls(true); return }
+                if (index >= p.points.lastIndex) { demo=false; action.text=tr("go"); nextButton.text="DEMO"; showDrivingControls(true); return }
                 ui.postDelayed(this, 500)
             }
         }
@@ -768,8 +773,10 @@ class MainActivity : Activity(), LocationListener {
         reroutePolicy.observe(false, result.fix.errorM, accuracy, now)
         positionIndex = result.fix.segment.coerceIn(0, route.points.lastIndex)
         val remaining = (route.totalMetres-result.fix.metres).coerceAtLeast(0.0)
+        lastRemainingMetres = remaining
+        currentNote = result.noteIndex.coerceAtLeast(0)
         info.text = "${(speed*3.6).toInt().coerceAtLeast(0)} km/h"
-        tripDistance.text = "${RallyDistanceFormatter.remaining(remaining)} restantes"
+        tripDistance.text = RallyDistanceFormatter.remaining(remaining) + " " + tr("remaining")
         val next = route.notes.getOrNull(result.noteIndex)
         if (next == null) {
             resetNoteCard("#43D9A6", "FIN", "TRAMO LIMPIO", "SIN NOTAS INMEDIATAS  ·  ATENCIÓN AL CAMINO")
@@ -790,7 +797,7 @@ class MainActivity : Activity(), LocationListener {
         if (result.arrived) {
             navigationSession++
             reroutePolicy.reset()
-            navigating = false; demo = false; action.text = "INICIAR GPS"
+            navigating = false; demo = false; action.text = tr("go")
             showDrivingControls(true)
         }
     }
@@ -879,7 +886,7 @@ class MainActivity : Activity(), LocationListener {
             status("Motor de voz iniciándose. Revisá los ajustes TTS del teléfono.", true)
             return
         }
-        val options = availableSpanishVoices()
+        val options = availableLocalizedVoices()
         if (options.isEmpty()) {
             android.app.AlertDialog.Builder(this).setTitle("VOCES EN ESPAÑOL")
                 .setMessage("No hay voces españolas sin conexión instaladas en el motor actual. Instalá voces desde Android, RHVoice o SherpaTTS y elegí ese motor en el sistema.")
