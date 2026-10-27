@@ -267,6 +267,13 @@ class MainActivity : Activity(), LocationListener {
             buttonTintList = android.content.res.ColorStateList.valueOf(Color.parseColor(sky))
         }
         body.addView(autoChoice, LinearLayout.LayoutParams(-1, -2).apply { topMargin=dp(7) })
+        val galleryButton = button(tr("vehicle"), panel, sky).apply {
+            setOnClickListener {
+                autoChoice.isChecked = true
+                selectVehicleMarker()
+            }
+        }
+        body.addView(galleryButton, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin=dp(9) })
         val caution = label(RallyLanguage.text(selectedLanguage, "voice_hint"), 12f, muted)
         body.addView(caution, LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(16); bottomMargin=dp(20) })
         val begin = button(RallyLanguage.text(selectedLanguage, "start"), "#0E8BA1", "#FFFFFF")
@@ -280,6 +287,7 @@ class MainActivity : Activity(), LocationListener {
                 heading.text = RallyLanguage.text(selectedLanguage, "language")
                 caution.text = RallyLanguage.text(selectedLanguage, "voice_hint")
                 begin.text = RallyLanguage.text(selectedLanguage, "start")
+                galleryButton.text = RallyLanguage.text(selectedLanguage, "vehicle")
             }
         }
         begin.setOnClickListener {
