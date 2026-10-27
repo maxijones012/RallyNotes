@@ -95,6 +95,7 @@ class MainActivity : Activity(), LocationListener {
     private lateinit var linkedNoteLabel: TextView
     private lateinit var linkedNoteColumn: LinearLayout
     private lateinit var info: TextView
+    private lateinit var tripDistance: TextView
     private lateinit var searchRow: LinearLayout
     private lateinit var toolsRow: LinearLayout
     private lateinit var action: TextView
@@ -370,8 +371,14 @@ class MainActivity : Activity(), LocationListener {
             setPadding(dp(12), dp(10), dp(12), dp(12))
             elevation=dp(10).toFloat()
         }
-        info = label("SIN RUTA · GPS", 13f, muted, true).apply { gravity=Gravity.CENTER }
-        bottom.addView(info, LinearLayout.LayoutParams(-1, -2))
+        info = label("SIN RUTA · GPS", 15f, muted, true)
+        tripDistance = label("— km restantes", 18f, white, true).apply {
+            gravity = Gravity.RIGHT or Gravity.CENTER_VERTICAL
+        }
+        bottom.addView(row(12) {
+            add(info, 0, dp(36), 1f)
+            add(tripDistance, -2, dp(36))
+        })
 
         val actionRow = row(8) {
             action = button("TRAZAR RUTA", "#0E8BA1", "#FFFFFF").also { it.setOnClickListener { mainAction() } }
@@ -492,7 +499,8 @@ class MainActivity : Activity(), LocationListener {
         showDrivingControls(false)
         val km = "%.1f".format(Locale.US, parsed.totalMetres / 1000.0)
         resetNoteCard("#22D3EE", "RUTA LISTA", "${parsed.notes.size} NOTAS DETECTADAS", "${km} KM  ·  REVISÁ LAS NOTAS ANTES DE SALIR")
-        info.text = "$km KM  •  ${parsed.notes.size} CURVAS  •  1–6"
+        info.text = "${parsed.notes.size} NOTAS · 1–6"
+        tripDistance.text = "$km km restantes"
         drawPlan()
         if (save && parsed.points.size <= 30000) prefs.edit().putString("last_route", RouteStore.serialize(parsed.points)).apply()
         val center = parsed.points[parsed.points.size/2]
@@ -561,7 +569,8 @@ class MainActivity : Activity(), LocationListener {
         reroutePolicy.observe(false, result.fix.errorM, accuracy, now)
         positionIndex = result.fix.segment.coerceIn(0, route.points.lastIndex)
         val remaining = (route.totalMetres-result.fix.metres).coerceAtLeast(0.0)
-        info.text = "${(speed*3.6).toInt().coerceAtLeast(0)} km/h  •  ${"%.1f".format(Locale.US,remaining/1000)} km restantes"
+        info.text = "${(speed*3.6).toInt().coerceAtLeast(0)} km/h"
+        tripDistance.text = "${RallyDistanceFormatter.remaining(remaining)} restantes"
         val next = route.notes.getOrNull(result.noteIndex)
         if (next == null) {
             resetNoteCard("#43D9A6", "FIN", "TRAMO LIMPIO", "SIN NOTAS INMEDIATAS  ·  ATENCIÓN AL CAMINO")
