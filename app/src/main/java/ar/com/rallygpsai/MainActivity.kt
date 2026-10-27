@@ -379,7 +379,7 @@ class MainActivity : Activity(), LocationListener {
         val display = RallyNotePresentation.render(note, next, distanceMetres)
         setNoteVisual(PaceNotes.color(display.grade), tr("note"))
         nextTurnDistance.visibility = View.VISIBLE
-        distanceNumber.text = display.distanceValue
+        distanceNumber.text = if (display.distanceUnit.isEmpty()) tr("now") else display.distanceValue
         distanceNumber.textSize = if (display.distanceUnit.isEmpty()) 29f else 39f
         distanceUnit.text = display.distanceUnit
         primaryNoteTile.visibility = View.VISIBLE
@@ -706,8 +706,8 @@ class MainActivity : Activity(), LocationListener {
         action.text = tr("go"); nextButton.text = "DEMO"
         showDrivingControls(false)
         val km = "%.1f".format(Locale.US, parsed.totalMetres / 1000.0)
-        resetNoteCard("#22D3EE", "RUTA LISTA", "${parsed.notes.size} NOTAS DETECTADAS", "${km} KM  ·  REVISÁ LAS NOTAS ANTES DE SALIR")
-        info.text = "${parsed.notes.size} NOTAS · 1–6"
+        resetNoteCard("#22D3EE", tr("ready"), parsed.notes.size.toString() + " " + tr("detected"), km + " km · " + tr("dest_sub"))
+        info.text = parsed.notes.size.toString() + " " + tr("detected") + " · 1–6"
         lastRemainingMetres = parsed.totalMetres
         tripDistance.text = "$km km " + tr("remaining")
         drawPlan()
