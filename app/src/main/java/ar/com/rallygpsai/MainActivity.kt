@@ -869,24 +869,34 @@ class MainActivity : Activity(), LocationListener {
         drawWaypoints()
     }
     private fun drawWaypoints() {
-        val s = map?.style ?: return
-        val points = mutableListOf<Feature>()
-        chosenOrigin?.let { points.add(Feature.fromGeometry(Point.fromLngLat(it.longitude,it.latitude)).apply { addStringProperty("label","ORIGEN") }) }
-        target?.let { points.add(Feature.fromGeometry(Point.fromLngLat(it.longitude,it.latitude)).apply { addStringProperty("label","DESTINO") }) }
-        intermediatePoints.forEachIndexed { i,p ->
-            points.add(Feature.fromGeometry(Point.fromLngLat(p.longitude,p.latitude)).apply { addStringProperty("label","VÍA ${i+1}") })
+        val style = map?.style ?: return
+        val markers = mutableListOf<Feature>()
+        fun pointMarker(point: GeoPoint, name: String, tone: String) {
+            markers.add(Feature.fromGeometry(Point.fromLngLat(point.longitude,point.latitude)).apply {
+                addStringProperty("label", name)
+                addStringProperty("tone", tone)
+            })
         }
-        val features = FeatureCollection.fromFeatures(points)
-        val source = s.getSourceAs<GeoJsonSource>("rally_waypoints")
+        chosenOrigin?.let { pointMarker(it,"ORIGEN","#46C8EA") }
+        // A calculated road route retains the destination pin after target is cleared.
+        (target ?: routeDestination)?.let { pointMarker(it,"DESTINO","#43D9A6") }
+        intermediatePoints.forEachIndexed { index,p ->
+            pointMarker(p,"VÍA ${index+1}","#F3D14A")
+        }
+        val collection = FeatureCollection.fromFeatures(markers)
+        val source = style.getSourceAs<GeoJsonSource>("rally_waypoints")
         if (source == null) {
-            s.addSource(GeoJsonSource("rally_waypoints", features))
-            s.addLayer(CircleLayer("rally_waypoints_circles", "rally_waypoints").withProperties(
-                circleColor("#43D9A6"), circleRadius(7f), circleStrokeColor("#FFFFFF"), circleStrokeWidth(2f)))
-            s.addLayer(SymbolLayer("rally_waypoints_labels", "rally_waypoints").withProperties(
+            style.addSource(GeoJsonSource("rally_waypoints",collection))
+            style.addLayer(CircleLayer("rally_waypoints_circles","rally_waypoints").withProperties(
+                circleColor(Expression.get("tone")), circleRadius(8f),
+                circleStrokeColor("#FFFFFF"), circleStrokeWidth(2f)))
+            style.addLayer(SymbolLayer("rally_waypoints_labels","rally_waypoints").withProperties(
                 textField(Expression.get("label")), textSize(12f), textColor("#FFFFFF"),
-                textHaloColor("#111827"), textHaloWidth(2f), textOffset(arrayOf(0f, -1.8f))))
-        } else source.setGeoJson(features)
+                textHaloColor("#111827"), textHaloWidth(2f),
+                textOffset(arrayOf(0f,-1.8f))))
+        } else source.setGeoJson(collection)
     }
+
     /**
      * Real-position map marker: the Subaru's hood always points in the actual driving
      * direction (route tangent in DEMO, reliable GPS heading otherwise).
@@ -909,21 +919,21 @@ class MainActivity : Activity(), LocationListener {
         if (source == null) {
             s.addSource(GeoJsonSource("rally_me",f))
             val car = SubaruMarker.bitmap()
+            // Always keep a classic dot as a selectable alternative and as a fallback.
+            s.addLayer(CircleLayer("rally_me_layer","rally_me").withProperties(
+                circleColor(sky), circleRadius(9f), circleStrokeColor("#FFFFFF"),
+                circleStrokeWidth(3f)))
             if (car != null) {
-                s.addImage("rally_subaru_blue", car)
+                s.addImage("rally_subaru_blue",car)
                 s.addLayer(SymbolLayer("rally_car_layer","rally_me").withProperties(
                     iconImage("rally_subaru_blue"),
-                    iconSize(0.72f),
+                    iconSize(0.85f),
                     iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_MAP),
                     iconAllowOverlap(true),
                     iconIgnorePlacement(true),
                     iconRotate(carBearing(p))))
-            } else {
-                // Graceful fallback if the sprite cannot be decoded.
-                s.addLayer(CircleLayer("rally_me_layer","rally_me").withProperties(
-                    circleColor(sky), circleRadius(9f), circleStrokeColor("#FFFFFF"),
-                    circleStrokeWidth(3f)))
             }
+            updateVehicleLayers()
         } else source.setGeoJson(f)
         s.getLayerAs<SymbolLayer>("rally_car_layer")?.setProperties(iconRotate(carBearing(p)))
         if ((navigating || demo) && followRouteCamera) {
@@ -936,6 +946,28 @@ class MainActivity : Activity(), LocationListener {
                 .zoom(pose.zoom).tilt(pose.tilt).bearing(pose.bearing).build()), if (demo) 430 else 650)
         }
     }
+    private fun updateVehicleLayers() {
+        val style = map?.style ?: return
+        val hasCar = style.getLayer("rally_car_layer") != null
+        val showCar = hasCar && prefs.getBoolean("subaru_marker",true)
+        style.getLayer("rally_car_layer")?.setProperties(
+            visibility(if (showCar) Property.VISIBLE else Property.NONE))
+        style.getLayer("rally_me_layer")?.setProperties(
+            visibility(if (showCar) Property.NONE else Property.VISIBLE))
+    }
+
+    private fun selectVehicleMarker() {
+        val models = arrayOf("Subaru azul · rally", "Punto GPS clásico")
+        val chosen = if (prefs.getBoolean("subaru_marker",true)) 0 else 1
+        android.app.AlertDialog.Builder(this).setTitle("VEHÍCULO EN EL MAPA")
+            .setSingleChoiceItems(models,chosen) { dialog, selected ->
+                prefs.edit().putBoolean("subaru_marker",selected == 0).apply()
+                updateVehicleLayers()
+                status("Marcador elegido: ${models[selected]}",false)
+                dialog.dismiss()
+            }.setNegativeButton("CERRAR",null).show()
+    }
+
     private fun drawLocation() { gps?.let { drawPosition(it) } }
     private fun toggle3D() {
         map3d = !map3d
@@ -1057,7 +1089,7 @@ class MainActivity : Activity(), LocationListener {
 
     private fun showSettings() {
         val names=arrayOf("Aviso corto (4 s)","Aviso normal (7 s)","Aviso anticipado (10 s)",
-            "Volver a escuchar una nota", "Mostrar notas completas", "Elegir voz de copiloto", "Probar voz de rally", "Elegir voz TTS Android", "Velocidad y tono TTS", "Instalar/cambiar motor TTS", "Licencias de voz")
+            "Volver a escuchar una nota", "Mostrar notas completas", "Elegir voz de copiloto", "Probar voz de rally", "Elegir voz TTS Android", "Velocidad y tono TTS", "Instalar/cambiar motor TTS", "Licencias de voz", "Elegir vehículo del GPS")
         android.app.AlertDialog.Builder(this).setTitle("COPILOTO · AJUSTES")
             .setItems(names) { _, i ->
                 if(i in 0..2) { warnFactor=i; prefs.edit().putInt("anticipation",i).apply();status("Anticipación: ${names[i]}",false) }
@@ -1069,6 +1101,7 @@ class MainActivity : Activity(), LocationListener {
                 if (i==7) chooseVoice()
                 if (i==8) adjustVoice()
                 if (i==9) openTtsSettings()
+                if (i==11) selectVehicleMarker()
                 if (i==10) android.app.AlertDialog.Builder(this).setTitle("LICENCIAS")
                     .setMessage("CarlFM (es-ES) · rhasspy/piper-voices · MIT. Dataset: dominio público. El modelo y el sintetizador no están incluidos, solo audios OGG. Más datos en github.com/maxijones012/RallyNotes/blob/main/docs/VOICE_LICENSES.md")
                     .setPositiveButton("CERRAR",null).show()
