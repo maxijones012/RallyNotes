@@ -242,12 +242,6 @@ class MainActivity : Activity(), LocationListener {
                 setPadding(dp(8), dp(8), dp(8), dp(8))
                 isChecked = RallyLanguage.codes[index] == selectedLanguage
             }
-            choice.setOnClickListener {
-                selectedLanguage = RallyLanguage.codes[index]
-                title.text = RallyLanguage.text(selectedLanguage, "welcome")
-                subtitle.text = RallyLanguage.text(selectedLanguage, "select")
-                heading.text = RallyLanguage.text(selectedLanguage, "language")
-            }
             options.addView(choice, RadioGroup.LayoutParams(-1, dp(51)))
         }
         body.addView(options, LinearLayout.LayoutParams(-1, -2))
@@ -271,6 +265,17 @@ class MainActivity : Activity(), LocationListener {
         body.addView(caution, LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(16); bottomMargin=dp(20) })
         val begin = button(RallyLanguage.text(selectedLanguage, "start"), "#0E8BA1", "#FFFFFF")
         begin.textSize = 17f
+        options.setOnCheckedChangeListener { _, checkedId ->
+            val index = (0 until options.childCount).indexOfFirst { options.getChildAt(it).id == checkedId }
+            if (index >= 0) {
+                selectedLanguage = RallyLanguage.codes[index]
+                title.text = RallyLanguage.text(selectedLanguage, "welcome")
+                subtitle.text = RallyLanguage.text(selectedLanguage, "select")
+                heading.text = RallyLanguage.text(selectedLanguage, "language")
+                caution.text = RallyLanguage.text(selectedLanguage, "voice_hint")
+                begin.text = RallyLanguage.text(selectedLanguage, "start")
+            }
+        }
         begin.setOnClickListener {
             val oldLanguage = appLanguage
             appLanguage = RallyLanguage.normalized(selectedLanguage)
