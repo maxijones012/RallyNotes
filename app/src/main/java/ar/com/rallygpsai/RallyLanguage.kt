@@ -32,7 +32,16 @@ object RallyLanguage {
         "linked" to "ENLAZA", "long" to "LARGA", "close" to "CIERRA A", "open" to "ABRE A",
         "hairpin" to "HORQUILLA", "now" to "AHORA", "remaining" to "restantes",
         "destination_selected" to "DESTINO SELECCIONADO", "language_saved" to "Idioma guardado",
-        "ready" to "RUTA LISTA", "detected" to "NOTAS DETECTADAS", "approx" to "APROXIMADA"
+        "ready" to "RUTA LISTA", "detected" to "NOTAS DETECTADAS", "approx" to "APROXIMADA",
+        "warn_short" to "Aviso corto (4 s)", "warn_normal" to "Aviso normal (7 s)", "warn_early" to "Aviso anticipado (10 s)",
+        "repeat" to "Volver a escuchar una nota", "all_notes" to "Mostrar notas completas",
+        "copilot" to "Elegir voz de copiloto", "test_voice" to "Probar voz de rally",
+        "android_voice" to "Elegir voz Android", "pitch" to "Velocidad y tono de voz",
+        "engine" to "Instalar/cambiar motor TTS", "licenses" to "Licencias de voz",
+        "vehicle" to "Elegir vehículo del GPS", "destination_point" to "Señalar destino en mapa",
+        "origin_point" to "Señalar origen en mapa", "via_point" to "Agregar parada intermedia",
+        "gps_origin" to "Usar GPS como origen", "clear_stops" to "Borrar todas las paradas",
+        "points_title" to "ORIGEN · DESTINO · PARADAS"
     )
     private val en = mapOf(
         "welcome" to "Welcome to Rally GPS AI!", "select" to "Choose your navigation and co-driver language.",
@@ -48,7 +57,16 @@ object RallyLanguage {
         "linked" to "INTO", "long" to "LONG", "close" to "TIGHTENS TO", "open" to "OPENS TO",
         "hairpin" to "HAIRPIN", "now" to "NOW", "remaining" to "remaining",
         "destination_selected" to "DESTINATION SELECTED", "language_saved" to "Language saved",
-        "ready" to "ROUTE READY", "detected" to "NOTES DETECTED", "approx" to "APPROXIMATE"
+        "ready" to "ROUTE READY", "detected" to "NOTES DETECTED", "approx" to "APPROXIMATE",
+        "warn_short" to "Short warning (4 s)", "warn_normal" to "Normal warning (7 s)", "warn_early" to "Early warning (10 s)",
+        "repeat" to "Replay last note", "all_notes" to "Show all pace notes",
+        "copilot" to "Choose co-driver voice", "test_voice" to "Test rally voice",
+        "android_voice" to "Choose Android voice", "pitch" to "Voice rate and pitch",
+        "engine" to "Install/change TTS engine", "licenses" to "Voice licenses",
+        "vehicle" to "Choose GPS vehicle", "destination_point" to "Select destination on map",
+        "origin_point" to "Select origin on map", "via_point" to "Add intermediate stop",
+        "gps_origin" to "Use GPS as origin", "clear_stops" to "Clear all stops",
+        "points_title" to "ORIGIN · DESTINATION · STOPS"
     )
     private val pt = mapOf(
         "welcome" to "Bem-vindo ao Rally GPS AI!", "select" to "Escolha o idioma da navegação e do copiloto.",
@@ -64,7 +82,16 @@ object RallyLanguage {
         "linked" to "EMENDA", "long" to "LONGA", "close" to "FECHA PARA", "open" to "ABRE PARA",
         "hairpin" to "COTOVELO", "now" to "AGORA", "remaining" to "restantes",
         "destination_selected" to "DESTINO SELECIONADO", "language_saved" to "Idioma salvo",
-        "ready" to "ROTA PRONTA", "detected" to "NOTAS DETECTADAS", "approx" to "APROXIMADA"
+        "ready" to "ROTA PRONTA", "detected" to "NOTAS DETECTADAS", "approx" to "APROXIMADA",
+        "warn_short" to "Aviso curto (4 s)", "warn_normal" to "Aviso normal (7 s)", "warn_early" to "Aviso antecipado (10 s)",
+        "repeat" to "Repetir última nota", "all_notes" to "Mostrar todas as notas",
+        "copilot" to "Escolher voz do copiloto", "test_voice" to "Testar voz de rali",
+        "android_voice" to "Escolher voz do Android", "pitch" to "Velocidade e tom da voz",
+        "engine" to "Instalar/alterar motor TTS", "licenses" to "Licenças de voz",
+        "vehicle" to "Escolher veículo do GPS", "destination_point" to "Selecionar destino no mapa",
+        "origin_point" to "Selecionar origem no mapa", "via_point" to "Adicionar parada",
+        "gps_origin" to "Usar GPS como origem", "clear_stops" to "Limpar paradas",
+        "points_title" to "ORIGEM · DESTINO · PARADAS"
     )
     fun text(code: String, key: String): String = when {
         normalized(code).startsWith("en") -> en[key]
