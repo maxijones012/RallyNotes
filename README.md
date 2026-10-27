@@ -1,6 +1,16 @@
 # Rally GPS AI 🏁
 
-Aplicación Android **nueva e independiente**, inspirada en funciones de Sideways y Rally SatNav. No contiene código, recursos visuales ni audios propietarios de esas aplicaciones. Paquete: `ar.com.rallygpsai`. **Estado: etapas 1–8, versión experimental 0.2.3.**
+Aplicación Android **nueva e independiente**, inspirada en funciones de Sideways y Rally SatNav. No contiene código, recursos visuales ni audios propietarios de esas aplicaciones. Paquete: `ar.com.rallygpsai`. **Estado: rama experimental 0.2.5 con cambios de interfaz, SIN APK compilada. Versión instalada anterior: 0.2.4.**
+
+## Cambios preparados para 0.2.5 (aún sin compilar)
+
+- Ícono adaptativo con la ilustración elegida, auto de rally azul y recorrido GPS.
+- Subaru azul o punto tradicional como marcador de GPS, seleccionable desde Ajustes.
+- Próxima curva con distancia grande en la cabecera; velocidad y distancia total separadas abajo.
+- Destino marcado con chip persistente, pin diferenciado, toque del mapa desde PUNTOS y pulsación prolongada.
+- Notas 1–6 con tarjetas rectangulares, modificadores y curvas enlazadas.
+- Plan de cierre y matriz de pruebas: [docs/PLAN_CIERRE_RALLY_GPS_AI.md](docs/PLAN_CIERRE_RALLY_GPS_AI.md).
+- **No se han ejecutado tareas de Gradle ni compilado la APK de esta rama.**
 
 ## Incluido en esta entrega
 
@@ -16,7 +26,7 @@ Aplicación Android **nueva e independiente**, inspirada en funciones de Sideway
 
 1. Abrir el proyecto con Android Studio reciente (JDK 17, SDK 35) y sincronizar Gradle.
 2. Compilar `:app:assembleDebug` e instalar `app/build/outputs/apk/debug/app-debug.apk`.
-3. Si está en GitHub, abrir pestaña **Actions** > `APK Android (Rally GPS AI)` > artefacto `Rally-GPS-AI-v0.2.3-debug` cuando la ejecución termine satisfactoriamente.
+3. Si está en GitHub, abrir pestaña **Actions** > `APK Android (Rally GPS AI)` > artefacto `Rally-GPS-AI-v0.2.5-CarlFM-debug` cuando la ejecución termine satisfactoriamente.
 4. Dar permiso de ubicación; comprobar conexión y datos móviles si vas a trazar rutas. El modo DEMO y archivos GPX funcionan sin acceder al cálculo de rutas online.
 
 ## Uso
