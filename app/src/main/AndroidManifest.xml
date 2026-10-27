@@ -5,7 +5,7 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <queries><intent><action android:name="android.intent.action.TTS_SERVICE" /></intent></queries>
-    <application android:label="Rally GPS AI" android:icon="@drawable/ic_rally" android:theme="@style/RallyTheme" android:usesCleartextTraffic="false" android:allowBackup="false">
+    <application android:label="Rally GPS AI" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher" android:theme="@style/RallyTheme" android:usesCleartextTraffic="false" android:allowBackup="false">
        <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="unspecified">
            <intent-filter>
              <action android:name="android.intent.action.MAIN" />
