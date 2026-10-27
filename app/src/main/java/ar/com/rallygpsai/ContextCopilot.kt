@@ -85,7 +85,10 @@ class ContextCopilot {
         } ?: return null
 
         if (!usedFeatures.add(cue.featureId)) return null
-        if (usedFeatures.size > 200) usedFeatures.clear().also { usedFeatures.add(cue.featureId) }
+        if (usedFeatures.size > 200) {
+            usedFeatures.clear()
+            usedFeatures.add(cue.featureId)
+        }
         lastCueMs = nowMs
         return cue
     }
