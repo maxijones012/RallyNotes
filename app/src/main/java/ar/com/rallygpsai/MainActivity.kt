@@ -1278,11 +1278,37 @@ class MainActivity : Activity(), LocationListener {
         updateDestinationIndicator()
     }
 
+    private fun selectContextualMode() {
+        val modes = listOf(ContextMode.OFF, ContextMode.OCCASIONAL, ContextMode.TALKATIVE)
+        val labels = arrayOf(tr("context_off"), tr("context_occasional"), tr("context_talkative"))
+        val saved = ContextMode.fromId(prefs.getString("context_commentary_mode", ContextMode.OCCASIONAL.id))
+        android.app.AlertDialog.Builder(this)
+            .setTitle(tr("context_menu"))
+            .setSingleChoiceItems(labels, modes.indexOf(saved)) { dialog, which ->
+                val selected = modes[which]
+                prefs.edit().putString("context_commentary_mode", selected.id).apply()
+                contextualCopilot.reset()
+                status(tr("context_menu") + ": " + labels[which], false)
+                dialog.dismiss()
+            }
+            .setNeutralButton(tr("test_voice")) { _, _ ->
+                if (voiceOn && speakReady && !navigating && !demo) {
+                    val preview = ContextCue(ContextKind.WINDING, "preview")
+                    say(RallyLanguage.contextComment(appLanguage, preview))
+                } else if (navigating || demo) {
+                    status("Probá la voz con el recorrido detenido", false)
+                } else {
+                    status("Activá la voz del copiloto para escuchar la prueba", false)
+                }
+            }
+            .setNegativeButton(tr("settings"), null).show()
+    }
+
     private fun showSettings() {
         val names=arrayOf(tr("warn_short"), tr("warn_normal"), tr("warn_early"),
             tr("repeat"), tr("all_notes"), tr("copilot"), tr("test_voice"),
             tr("android_voice"), tr("pitch"), tr("engine"), tr("licenses"),
-            tr("vehicle"), tr("change"))
+            tr("vehicle"), tr("change"), tr("context_menu"))
         android.app.AlertDialog.Builder(this).setTitle("COPILOTO · " + tr("settings"))
             .setItems(names) { _, i ->
                 if(i in 0..2) { warnFactor=i; prefs.edit().putInt("anticipation",i).apply();status("Anticipación: ${names[i]}",false) }
@@ -1296,6 +1322,7 @@ class MainActivity : Activity(), LocationListener {
                 if (i==9) openTtsSettings()
                 if (i==11) selectVehicleMarker()
                 if (i==12) showWelcomeSetup(firstRun = false)
+                if (i==13) selectContextualMode()
                 if (i==10) android.app.AlertDialog.Builder(this).setTitle("LICENCIAS")
                     .setMessage("CarlFM (es-ES) · rhasspy/piper-voices · MIT. Dataset: dominio público. El modelo y el sintetizador no están incluidos, solo audios OGG. Más datos en github.com/maxijones012/RallyNotes/blob/main/docs/VOICE_LICENSES.md")
                     .setPositiveButton("CERRAR",null).show()
