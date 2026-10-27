@@ -67,3 +67,17 @@ Cerrar la experiencia de navegación inspirada en Sideways y Rally SatNav: lectu
 - [ ] Revisar mensajes secundarios heredados que todavía están en español.
 
 **Ver detalle:** `docs/INICIO_GUIADO_IDIOMAS.md`. **No se compiló ni fusionó a main.**
+
+## Nueva etapa: copiloto contextual sin IA pesada
+
+- [x] Agregar motor Kotlin determinista que usa notas de curvas y recorrido ya cargado.
+- [x] Detectar tramos sinuosos, curvas enlazadas y secciones relativamente rectas.
+- [x] Incorporar comentarios ocasionales, sin deducir pozos, barro, tráfico ni condiciones climáticas.
+- [x] Agregar ajustes Desactivado / Ocasional (predeterminado) / Conversador.
+- [x] Guardar preferencias, suprimir comentarios cerca de curvas, durante audio prioritario, con GPS poco preciso y durante recálculos.
+- [x] Localizar comentarios en los cuatro idiomas disponibles.
+- [x] Agregar pruebas JUnit independientes del mapa y documentar comportamiento.
+- [ ] Ejecutar pruebas Android y compilar la APK (pendiente por instrucción previa de no compilar).
+- [ ] Validar interrupciones, frecuencia y audibilidad en Motorola en pruebas seguras.
+
+**Documentación:** `docs/COPILOTO_CONTEXTUAL.md`. Esta etapa permanece en la rama, no fusionada a `main`.
