@@ -53,7 +53,7 @@ def spanish_number(num: int) -> str:
         return hundreds[base] if base == num else f'{hundreds[base]} {spanish_number(num-base)}'
     if num == 1000:
         return 'mil'
-    raise ValueError(f'Distancia de voz fuera del rango: {num}'
+    raise ValueError(f'Distancia de voz fuera del rango: {num}')
 
 
 def required_text() -> dict[str, str]:
