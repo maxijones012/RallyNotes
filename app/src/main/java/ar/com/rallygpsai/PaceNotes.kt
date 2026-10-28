@@ -27,23 +27,4 @@ object PaceNotes {
         4 -> "#F3D14A"; 5 -> "#43D9A6"; else -> "#46C8EA"
     }
 
-    /** Solo demostración: no coincide con una calle o camino y jamás sirve para navegar. */
-    fun synthetic(origin: GeoPoint): List<GeoPoint> {
-        val route = ArrayList<GeoPoint>()
-        var x = 0.0; var y = 0.0; var heading = -Math.PI / 2.0
-        for (i in 0..180) {
-            val curve = when (i) {
-                in 25..44 -> Math.PI / 2.0 / 20.0
-                in 66..84 -> -Math.PI * 0.7 / 19.0
-                in 110..121 -> Math.PI / 2.0 / 12.0
-                in 143..166 -> -Math.PI / 2.0 / 24.0
-                else -> 0.0
-            }
-            heading += curve
-            x += cos(heading) * 9.0; y += sin(heading) * 9.0
-            route.add(GeoPoint(origin.latitude + y / 111120.0,
-                origin.longitude + x / (111120.0 * cos(Math.toRadians(origin.latitude)))))
-        }
-        return route
-    }
 }

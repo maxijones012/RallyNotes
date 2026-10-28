@@ -55,16 +55,16 @@ jobs:
       - name: Publicar APK descargable
         uses: actions/upload-artifact@v4
         with:
-          name: Rally-GPS-AI-v0.2.7-CarlFM-debug
+          name: Rally-GPS-AI-v0.2.8-CarlFM-debug
           path: app/build/outputs/apk/debug/app-debug.apk
           retention-days: 14
 
-      - name: Publicar Release v0.2.7 con APK
+      - name: Publicar Release v0.2.8 con APK
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          VERSION=v0.2.7
+          VERSION=v0.2.8
           cp app/build/outputs/apk/debug/app-debug.apk "Rally_GPS_AI_${VERSION}.apk"
           cat > release_notes.txt <<'EOF'
           Rally GPS AI 0.2.7 (versión de prueba para Android)
