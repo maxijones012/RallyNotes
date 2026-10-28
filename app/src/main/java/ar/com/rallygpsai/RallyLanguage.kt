@@ -44,7 +44,13 @@ object RallyLanguage {
         "points_title" to "ORIGEN · DESTINO · PARADAS",
         "context_menu" to "Copiloto contextual", "context_off" to "Desactivado · solo notas",
         "context_occasional" to "Ocasional · cada 3–5 min",
-        "context_talkative" to "Conversador · cada 1–2 min"
+        "context_talkative" to "Conversador · cada 1–2 min",
+        "settings_nav" to "NAVEGACIÓN Y NOTAS", "settings_nav_desc" to "Anticipación, repetir y ver notas",
+        "settings_voice" to "VOZ Y COPILOTO", "settings_voice_desc" to "Voces, comentarios y ajustes de audio",
+        "settings_map" to "MAPA Y VEHÍCULO", "settings_map_desc" to "Seleccionar auto y cambiar tamaño",
+        "settings_app" to "IDIOMA E INFORMACIÓN", "settings_app_desc" to "Idioma y licencias",
+        "vehicle_size" to "Tamaño del vehículo GPS", "size_normal" to "Normal",
+        "size_large" to "Grande", "size_xl" to "Extra grande", "back" to "ATRÁS"
     )
     private val en = mapOf(
         "welcome" to "Welcome to Rally GPS AI!", "select" to "Choose your navigation and co-driver language.",
@@ -72,7 +78,13 @@ object RallyLanguage {
         "points_title" to "ORIGIN · DESTINATION · STOPS",
         "context_menu" to "Contextual co-driver", "context_off" to "Off · pace notes only",
         "context_occasional" to "Occasional · every 3–5 min",
-        "context_talkative" to "Talkative · every 1–2 min"
+        "context_talkative" to "Talkative · every 1–2 min",
+        "settings_nav" to "NAVIGATION & PACE NOTES", "settings_nav_desc" to "Warning timing, replay and note list",
+        "settings_voice" to "VOICE & CO-DRIVER", "settings_voice_desc" to "Voice packs, comments and audio",
+        "settings_map" to "MAP & VEHICLE", "settings_map_desc" to "Vehicle selection and size",
+        "settings_app" to "LANGUAGE & INFO", "settings_app_desc" to "Language and licenses",
+        "vehicle_size" to "GPS vehicle size", "size_normal" to "Normal",
+        "size_large" to "Large", "size_xl" to "Extra large", "back" to "BACK"
     )
     private val pt = mapOf(
         "welcome" to "Bem-vindo ao Rally GPS AI!", "select" to "Escolha o idioma da navegação e do copiloto.",
@@ -100,7 +112,13 @@ object RallyLanguage {
         "points_title" to "ORIGEM · DESTINO · PARADAS",
         "context_menu" to "Copiloto contextual", "context_off" to "Desativado · apenas notas",
         "context_occasional" to "Ocasional · a cada 3–5 min",
-        "context_talkative" to "Conversador · a cada 1–2 min"
+        "context_talkative" to "Conversador · a cada 1–2 min",
+        "settings_nav" to "NAVEGAÇÃO E NOTAS", "settings_nav_desc" to "Antecipação, repetir e mostrar notas",
+        "settings_voice" to "VOZ E COPILOTO", "settings_voice_desc" to "Vozes, comentários e ajustes de áudio",
+        "settings_map" to "MAPA E VEÍCULO", "settings_map_desc" to "Escolher veículo e tamanho",
+        "settings_app" to "IDIOMA E INFORMAÇÕES", "settings_app_desc" to "Idioma e licenças",
+        "vehicle_size" to "Tamanho do veículo no GPS", "size_normal" to "Normal",
+        "size_large" to "Grande", "size_xl" to "Extra grande", "back" to "VOLTAR"
     )
     fun text(code: String, key: String): String = when {
         normalized(code).startsWith("en") -> en[key]
