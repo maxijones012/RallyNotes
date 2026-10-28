@@ -2,7 +2,7 @@ plugins { id("com.android.application"); id("org.jetbrains.kotlin.android") }
 android {
     namespace = "ar.com.rallygpsai"
     compileSdk = 35
-    defaultConfig { applicationId = "ar.com.rallygpsai"; minSdk = 26; targetSdk = 35; versionCode = 8; versionName = "0.2.6" }
+    defaultConfig { applicationId = "ar.com.rallygpsai"; minSdk = 26; targetSdk = 35; versionCode = 9; versionName = "0.2.7" }
     buildTypes { getByName("release") { isMinifyEnabled = false } }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }
