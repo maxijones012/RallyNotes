@@ -18,7 +18,7 @@ object RallyVoicePack {
     fun tokens(note: PaceNote, next: PaceNote?, distanceM: Double): List<String> = buildList {
         if (distanceM.isFinite() && distanceM <= 22.0) add("ahora")
         else {
-            val metres = if (distanceM.isFinite()) ((distanceM / 10.0).roundToInt() * 10).coerceIn(20, 400) else 400
+            val metres = RallySpokenDistance.roundMetres(distanceM).coerceIn(20, 1000)
             add("en"); add("dist_$metres"); add("metros")
         }
         val left = note.side == PaceNote.Side.LEFT
@@ -46,6 +46,7 @@ object RallyVoicePack {
             add("se_cierra_a_$grade"); add("abre_a_$grade")
         }
         for (m in 20..400 step 10) add("dist_$m")
+        for (m in 500..1000 step 100) add("dist_$m")
     }
 }
 
@@ -100,6 +101,8 @@ class RallyAudioPlayer(private val context: Context) {
             stop()
         }
     }
+
+    fun isBusy(): Boolean = active
 
     fun stop() {
         generation++

@@ -22,6 +22,16 @@ class RallyVoicePackTest {
         assertEquals(listOf("en", "dist_90", "metros", "derecha_5", "se_cierra_a_3", "enlaza", "izquierda_4"), tokens)
         assertTrue(tokens.all { it in RallyVoicePack.requiredTokens() })
     }
+    @Test fun longDistanceWarningsUseDedicatedClips() {
+        val n = note(PaceNote.Side.RIGHT, 3)
+        val all = RallyVoicePack.requiredTokens()
+        assertEquals("dist_800", RallyVoicePack.tokens(n, null, 796.0)[1])
+        assertEquals("dist_700", RallyVoicePack.tokens(n, null, 680.0)[1])
+        assertEquals("dist_1000", RallyVoicePack.tokens(n, null, 1000.0)[1])
+        for (m in 500..1000 step 100) {
+            assertTrue(RallyVoicePack.tokens(n, null, m.toDouble()).all { it in all })
+        }
+    }
     @Test fun immediateHairpinAndLongCurve() {
         val n = note(PaceNote.Side.LEFT, 2, 100.0, 240.0).copy(cumulativeTurnDegrees = 165)
         assertEquals(listOf("ahora", "horquilla_izquierda", "larga"), RallyVoicePack.tokens(n, null, 8.0))

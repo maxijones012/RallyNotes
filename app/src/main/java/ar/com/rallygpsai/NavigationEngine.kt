@@ -2,6 +2,15 @@ package ar.com.rallygpsai
 
 import kotlin.math.*
 
+/** Distances available in prerecorded Spanish as well as Android TTS. */
+object RallySpokenDistance {
+    fun roundMetres(distance: Double): Int {
+        if (!distance.isFinite() || distance <= 22.0) return 0
+        if (distance > 400.0) return ((distance / 100.0).roundToInt() * 100).coerceIn(500, 1000)
+        return ((distance / 10.0).roundToInt() * 10).coerceIn(20, 400)
+    }
+}
+
 /** Projecta GPS a segmentos, no a vertices, para evitar saltos en trazados irregulares. */
 data class RouteFix(val metres: Double, val errorM: Double, val segment: Int)
 data class Guidance(val fix: RouteFix, val noteIndex: Int, val distanceToNoteM: Double,
@@ -11,11 +20,12 @@ class NavigationEngine(private val plan: RoutePlan, private val anticipation: ()
     private var lastProgress = 0.0
     private var lastSegment = 0
     private val announced = mutableSetOf<Int>()
+    private val earlyAnnounced = mutableSetOf<Int>()
     private var arrivalAnnounced = false
     private var lastFixAtNs = 0L
 
     fun reset() {
-        lastProgress = 0.0; lastSegment = 0; announced.clear(); arrivalAnnounced = false; lastFixAtNs = 0L
+        lastProgress = 0.0; lastSegment = 0; announced.clear(); earlyAnnounced.clear(); arrivalAnnounced = false; lastFixAtNs = 0L
     }
 
     fun locate(location: GeoPoint): RouteFix {
@@ -71,19 +81,31 @@ class NavigationEngine(private val plan: RoutePlan, private val anticipation: ()
         var speech: String? = null
         if (arrived && !arrivalAnnounced) {
             arrivalAnnounced = true; speech = "Llegaste al final del recorrido"
-        } else if (!offRoute && index >= 0 && !announced.contains(index) &&
-            distance <= PaceNotes.warningDistance(speedMs, anticipation())) {
-            announced.add(index)
+        } else if (!offRoute && index >= 0) {
             val note = plan.notes[index]
-            // Prefix distancia apropiada; sin anunciar cero si ya estamos dentro de la curva.
-            val prefix = if (distance <= 22.0) "Ahora, " else "En ${((distance/10).roundToInt()*10)} metros, "
-            val following = plan.notes.getOrNull(index+1)
-            speech = prefix + PaceNotes.phrase(note, following)
-            // A linked next curve is already announced in the same spoken sentence.
-            if (following != null && following.metresFromStart - note.endMetres in 0.0..85.0) {
-                announced.add(index+1)
+            val following = plan.notes.getOrNull(index + 1)
+            val nearThreshold = PaceNotes.warningDistance(speedMs, anticipation())
+            // Two call points: distance preview (~800 m), then the actual nearby bend.
+            // A note that begins inside the near zone gets just one announcement.
+            val near = distance <= nearThreshold
+            val early = !near && distance <= 800.0
+            val shouldSpeak = when {
+                near -> announced.add(index)
+                early -> earlyAnnounced.add(index)
+                else -> false
+            }
+            if (shouldSpeak) {
+                val rounded = RallySpokenDistance.roundMetres(distance)
+                val prefix = if (rounded == 0) "Ahora, " else "En $rounded metros, "
+                speech = prefix + PaceNotes.phrase(note, following)
+                // Linked turns are delivered in the same call, so suppress an immediate echo.
+                if (following != null &&
+                    following.metresFromStart - note.endMetres in 0.0..85.0) {
+                    if (near) announced.add(index+1) else earlyAnnounced.add(index+1)
+                }
             }
         }
+
         return Guidance(fix.copy(metres=lastProgress), index, distance, speech, offRoute, arrived)
     }
 }

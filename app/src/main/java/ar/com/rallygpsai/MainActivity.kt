@@ -28,6 +28,7 @@ import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.Style
 import org.maplibre.android.style.layers.CircleLayer
+import org.maplibre.android.style.layers.Property
 import org.maplibre.android.style.layers.SymbolLayer
 import org.maplibre.android.style.layers.LineLayer
 import org.maplibre.android.style.layers.PropertyFactory.*
@@ -54,6 +55,9 @@ class MainActivity : Activity(), LocationListener {
     private var chosenOrigin: GeoPoint? = null
     private val intermediatePoints = mutableListOf<GeoPoint>()
     private var mapSelectMode = 0 // 0 destino, 1 origen, 2 parada
+    private var destinationTapArmed = false // activado sólo desde PUNTOS → señalar destino
+    private var chosenDestinationText = "PUNTO MARCADO"
+    private var chosenDestinationApproximate = false
     private var navigator: NavigationEngine? = null
     private var controlsVisible = false
     private lateinit var locationManager: LocationManager
@@ -66,12 +70,21 @@ class MainActivity : Activity(), LocationListener {
     private var voiceEngineSettingsOpened = false
     private var map3d = true
     private val drivingCamera = DrivingCamera()
+    // Avoid uploading image textures to MapLibre on every GPS fix (often 1 Hz).
+    private var vehicleImageStyle: Style? = null
+    private val vehicleImageKeys = mutableSetOf<String>()
     private var followRouteCamera = true
     private var voiceOn = true
+    private var appLanguage = "es-AR"
     private var warnFactor = 1
     private var positionIndex = 0
     private var lastSpoken = -1
     private var currentNote = 0
+    private var lastNoteDistanceM = 0.0
+    private var lastRemainingMetres = 0.0
+    private val contextualCopilot = ContextCopilot()
+    private var lastPriorityNoteAtMs = -1L
+    private var contextualCommentIndex = 0
     private var firstGpsCamera = true
     private var demoPosition = 0.0
     private var demoSpeed = 55.0 / 3.6
@@ -86,17 +99,28 @@ class MainActivity : Activity(), LocationListener {
     private lateinit var noteBadge: TextView
     private lateinit var noteAccent: View
     private lateinit var noteCard: LinearLayout
+    private lateinit var nextTurnDistance: LinearLayout
+    private lateinit var distanceNumber: TextView
+    private lateinit var distanceUnit: TextView
     private lateinit var primaryNoteTile: RallyNoteTile
     private lateinit var linkedNoteTile: RallyNoteTile
     private lateinit var linkedNoteLabel: TextView
     private lateinit var linkedNoteColumn: LinearLayout
     private lateinit var info: TextView
+    private lateinit var tripDistance: TextView
     private lateinit var searchRow: LinearLayout
+    private lateinit var searchButton: TextView
+    private lateinit var pointsButton: TextView
+    private lateinit var settingsButton: TextView
+    private lateinit var nextCurveCaption: TextView
+    private lateinit var destinationIndicator: TextView
     private lateinit var toolsRow: LinearLayout
     private lateinit var action: TextView
     private lateinit var gpsButton: TextView
     private lateinit var modeButton: TextView
     private lateinit var voiceButton: TextView
+    private lateinit var floatingControls: LinearLayout
+    private lateinit var bottomPanel: LinearLayout
     private lateinit var nextButton: TextView
     private val bg = "#0F1726"
     private val panel = "#172336"
@@ -104,6 +128,7 @@ class MainActivity : Activity(), LocationListener {
     private val white = "#F8FAFC"
     private val muted = "#9AA9BD"
     private val prefs by lazy { getSharedPreferences("rally_v1", MODE_PRIVATE) }
+    private fun tr(key: String) = RallyLanguage.text(appLanguage, key)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -113,6 +138,7 @@ class MainActivity : Activity(), LocationListener {
         mapView = MapView(this)
         mapView.onCreate(savedInstanceState)
         locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
+        appLanguage = RallyLanguage.normalized(prefs.getString(RallyLanguage.KEY, RallyLanguage.defaultFor(Locale.getDefault())))
         voiceOn = prefs.getBoolean("voice", true)
         warnFactor = prefs.getInt("anticipation", 1)
         buildUI()
@@ -136,15 +162,25 @@ class MainActivity : Activity(), LocationListener {
                             status("Parada ${intermediatePoints.size} agregada", false)
                         } else status("Máximo de cuatro paradas", true)
                     }
-                    else -> { target = point; status("Destino señalado. Tocá TRAZAR RUTA", false) }
+                    else -> {
+                        chooseDestination(point, "PUNTO DEL MAPA")
+                        Toast.makeText(this, "✓ Destino elegido", Toast.LENGTH_SHORT).show()
+                    }
                 }
                 mapSelectMode = 0
+                destinationTapArmed = false
                 drawWaypoints()
                 true
             }
-            loaded.addOnMapClickListener {
-                if (navigating || demo) showDrivingControls(!controlsVisible)
-                false
+            loaded.addOnMapClickListener { position ->
+                if (destinationTapArmed && !navigating && !demo) {
+                    chooseDestination(GeoPoint(position.latitude, position.longitude), "PUNTO DEL MAPA")
+                    Toast.makeText(this, "✓ Destino elegido", Toast.LENGTH_SHORT).show()
+                    true
+                } else {
+                    if (navigating || demo) showDrivingControls(!controlsVisible)
+                    false
+                }
             }
             loaded.moveCamera(CameraUpdateFactory.newCameraPosition(
                 CameraPosition.Builder().target(LatLng(-40.0, -64.0)).zoom(3.7).build()
@@ -160,10 +196,156 @@ class MainActivity : Activity(), LocationListener {
             pendingStops = prefs.getString("last_road_stops", null)?.let {
                 runCatching { RouteStore.deserialize(it) }.getOrDefault(emptyList())
             } ?: emptyList()
+            updateDestinationIndicator("DESTINO GUARDADO")
+            drawWaypoints()
         }
-        requestGps()
+        if (prefs.getBoolean(RallyLanguage.SETUP_KEY, false)) requestGps()
+        else showWelcomeSetup(firstRun = true)
     }
 
+    /** Full-screen first-use setup; can be reopened from Settings without deleting routes. */
+    private fun showWelcomeSetup(firstRun: Boolean) {
+        val dialog = android.app.Dialog(this)
+        dialog.setCancelable(!firstRun)
+        dialog.window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.parseColor("#090F1B")))
+        val root = ScrollView(this).apply {
+            isFillViewport = true
+            setBackgroundColor(Color.parseColor("#090F1B"))
+        }
+        val body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(26), dp(24), dp(26), dp(28))
+        }
+        val iconView = ImageView(this).apply {
+            setImageResource(R.mipmap.ic_launcher)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            contentDescription = "Rally GPS AI"
+        }
+        body.addView(iconView, LinearLayout.LayoutParams(dp(105), dp(105)).apply {
+            gravity = Gravity.CENTER_HORIZONTAL
+            bottomMargin = dp(22)
+        })
+        val title = label(tr("welcome"), 26f, white, true).apply {
+            gravity = Gravity.CENTER
+            textAlignment = View.TEXT_ALIGNMENT_CENTER
+        }
+        val subtitle = label(tr("select"), 15f, muted).apply {
+            gravity = Gravity.CENTER
+            textAlignment = View.TEXT_ALIGNMENT_CENTER
+        }
+        body.addView(title, LinearLayout.LayoutParams(-1, -2))
+        body.addView(subtitle, LinearLayout.LayoutParams(-1, -2).apply { topMargin=dp(9); bottomMargin=dp(22) })
+        val heading = label(tr("language"), 12f, sky, true)
+        body.addView(heading)
+        val options = RadioGroup(this).apply { orientation = RadioGroup.VERTICAL }
+        var selectedLanguage = appLanguage
+        RallyLanguage.names.forEachIndexed { index, name ->
+            val choice = RadioButton(this).apply {
+                id = View.generateViewId()
+                text = name
+                textSize = 16f
+                setTextColor(Color.WHITE)
+                buttonTintList = android.content.res.ColorStateList.valueOf(Color.parseColor(sky))
+                setPadding(dp(8), dp(8), dp(8), dp(8))
+                isChecked = RallyLanguage.codes[index] == selectedLanguage
+            }
+            options.addView(choice, RadioGroup.LayoutParams(-1, dp(51)))
+        }
+        body.addView(options, LinearLayout.LayoutParams(-1, -2))
+        val voiceChoice = CheckBox(this).apply {
+            text = "🔊  Copiloto / Co-driver"
+            textSize = 15f
+            setTextColor(Color.WHITE)
+            isChecked = voiceOn
+            buttonTintList = android.content.res.ColorStateList.valueOf(Color.parseColor(sky))
+        }
+        body.addView(voiceChoice, LinearLayout.LayoutParams(-1, -2).apply { topMargin=dp(18) })
+        val autoChoice = CheckBox(this).apply {
+            text = "🚙  Vehículo GPS / GPS vehicle"
+            textSize = 15f
+            setTextColor(Color.WHITE)
+            isChecked = RallyVehicles.selectedId(prefs) != RallyVehicles.DOT
+            buttonTintList = android.content.res.ColorStateList.valueOf(Color.parseColor(sky))
+        }
+        body.addView(autoChoice, LinearLayout.LayoutParams(-1, -2).apply { topMargin=dp(7) })
+        val galleryButton = button(tr("vehicle"), panel, sky).apply {
+            setOnClickListener {
+                autoChoice.isChecked = true
+                selectVehicleMarker()
+            }
+        }
+        body.addView(galleryButton, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin=dp(9) })
+        val caution = label(RallyLanguage.text(selectedLanguage, "voice_hint"), 12f, muted)
+        body.addView(caution, LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(16); bottomMargin=dp(20) })
+        val begin = button(RallyLanguage.text(selectedLanguage, "start"), "#0E8BA1", "#FFFFFF")
+        begin.textSize = 17f
+        options.setOnCheckedChangeListener { _, checkedId ->
+            val index = (0 until options.childCount).indexOfFirst { options.getChildAt(it).id == checkedId }
+            if (index >= 0) {
+                selectedLanguage = RallyLanguage.codes[index]
+                title.text = RallyLanguage.text(selectedLanguage, "welcome")
+                subtitle.text = RallyLanguage.text(selectedLanguage, "select")
+                heading.text = RallyLanguage.text(selectedLanguage, "language")
+                caution.text = RallyLanguage.text(selectedLanguage, "voice_hint")
+                begin.text = RallyLanguage.text(selectedLanguage, "start")
+                galleryButton.text = RallyLanguage.text(selectedLanguage, "vehicle")
+            }
+        }
+        begin.setOnClickListener {
+            val oldLanguage = appLanguage
+            appLanguage = RallyLanguage.normalized(selectedLanguage)
+            voiceOn = voiceChoice.isChecked
+            prefs.edit()
+                .putString(RallyLanguage.KEY, appLanguage)
+                .putBoolean(RallyLanguage.SETUP_KEY, true)
+                .putBoolean("voice", voiceOn)
+                .putBoolean("subaru_marker", autoChoice.isChecked)
+                .putString(RallyVehicles.KEY, if (autoChoice.isChecked) {
+                    val previously = RallyVehicles.selectedId(prefs)
+                    if (previously == RallyVehicles.DOT) RallyVehicles.DEFAULT else previously
+                } else RallyVehicles.DOT)
+                .apply()
+            if (!RallyLanguage.isSpanish(appLanguage)) {
+                prefs.edit().putString("rally_voice_mode", RallyVoicePack.SYSTEM).apply()
+            }
+            if (oldLanguage != appLanguage) initializeVoiceEngine()
+            updateVehicleLayers()
+            refreshLanguageUi()
+            dialog.dismiss()
+            if (firstRun) requestGps()
+        }
+        body.addView(begin, LinearLayout.LayoutParams(-1, dp(56)))
+        root.addView(body, android.view.ViewGroup.LayoutParams(-1, -2))
+        dialog.setContentView(root)
+        dialog.show()
+        dialog.window?.setLayout(android.view.WindowManager.LayoutParams.MATCH_PARENT,
+            android.view.WindowManager.LayoutParams.MATCH_PARENT)
+    }
+
+    /** The existing map/route session stays in memory when changing the language. */
+    private fun refreshLanguageUi() {
+        if (!::searchInput.isInitialized) return
+        searchInput.hint = tr("search_hint")
+        searchButton.text = tr("search")
+        voiceButton.text = if (voiceOn) tr("voice_on") else tr("voice_off")
+        pointsButton.text = tr("points")
+        settingsButton.text = tr("settings")
+        nextCurveCaption.text = tr("next")
+        action.text = when {
+            navigating || demo -> tr("finish")
+            plan != null && target == null -> tr("go")
+            else -> tr("route")
+        }
+        if (demo) nextButton.text = tr("pause")
+        tripDistance.text = RallyDistanceFormatter.remaining(lastRemainingMetres) + " " + tr("remaining")
+        if (plan == null) resetNoteCard(sky, "RALLY GPS AI", tr("dest"), tr("dest_sub"))
+        else {
+            val shownNote = plan?.notes?.getOrNull(currentNote)
+            if (shownNote != null && (navigating || demo)) updateNoteCard(shownNote, plan?.notes?.getOrNull(currentNote+1), lastNoteDistanceM)
+        }
+        status(tr("gps"), false)
+    }
     private fun dp(value: Int) = (resources.displayMetrics.density * value + 0.5f).toInt()
     private fun systemBarInset(name: String): Int {
         val id = resources.getIdentifier(name, "dimen", "android")
@@ -213,22 +395,38 @@ class MainActivity : Activity(), LocationListener {
     }
 
     private fun updateNoteCard(note: PaceNote, next: PaceNote?, distanceMetres: Double) {
+        lastNoteDistanceM = distanceMetres
         val display = RallyNotePresentation.render(note, next, distanceMetres)
-        setNoteVisual(PaceNotes.color(display.grade), display.distanceLabel)
+        setNoteVisual(PaceNotes.color(display.grade), tr("note"))
+        nextTurnDistance.visibility = View.VISIBLE
+        distanceNumber.text = if (display.distanceUnit.isEmpty()) tr("now") else display.distanceValue
+        distanceNumber.textSize = if (display.distanceUnit.isEmpty()) 29f else 39f
+        distanceUnit.text = display.distanceUnit
         primaryNoteTile.visibility = View.VISIBLE
         primaryNoteTile.show(display.grade, display.side)
-        noteTitle.text = display.headline
-        noteDetail.text = display.featuresLabel + if (display.lowConfidence) "  ·  APROXIMADA" else ""
+        noteTitle.text = if (display.side == PaceNote.Side.LEFT) tr("left") else tr("right")
+        noteDetail.text = if (RallyLanguage.isSpanish(appLanguage)) {
+            display.featuresLabel + if (display.lowConfidence) " · " + tr("approx") else ""
+        } else {
+            val details = mutableListOf<String>()
+            if (note.cumulativeTurnDegrees >= 145 && note.grade <= 2) details += tr("hairpin")
+            if (note.endMetres-note.metresFromStart >= 95.0 || (note.cumulativeTurnDegrees >= 95 && note.grade >= 3)) details += tr("long")
+            note.tightensTo?.let { if (it < note.grade) details += tr("close") + " " + it }
+            note.opensTo?.let { if (it > note.grade) details += tr("open") + " " + it }
+            if (display.lowConfidence) details += tr("approx")
+            details.joinToString(" · ").ifBlank { tr("note") }
+        }
         val linked = display.chained
         linkedNoteColumn.visibility = if (linked == null) View.GONE else View.VISIBLE
         if (linked != null) {
             linkedNoteTile.show(linked.grade, linked.side)
-            linkedNoteLabel.text = "ENLAZA"
+            linkedNoteLabel.text = tr("linked")
         }
     }
 
     private fun resetNoteCard(tone: String, badge: String, headline: String, subline: String) {
         setNoteVisual(tone, badge)
+        nextTurnDistance.visibility = View.GONE
         primaryNoteTile.visibility = View.GONE
         linkedNoteColumn.visibility = View.GONE
         noteTitle.text = headline
@@ -248,42 +446,46 @@ class MainActivity : Activity(), LocationListener {
             background = shape(bg, 16, "#294561")
             elevation = dp(10).toFloat()
         }
-        top.add(row(8) {
-            add(label("◢", 23f, sky, true), dp(27))
-            add(label("RALLY GPS AI", 16f, white, true), 0, -2, 1f)
-            modeButton = button("3D", panel, sky).also { it.setOnClickListener { toggle3D() } }
-            add(modeButton, dp(56), dp(48))
-            voiceButton = button(if (voiceOn) "VOZ ✓" else "MUDO", panel, sky).also { it.setOnClickListener {
-                voiceOn = !voiceOn; prefs.edit().putBoolean("voice", voiceOn).apply()
-                it as TextView; it.text = if (voiceOn) "VOZ ✓" else "MUDO"
-                if (!voiceOn) { tts?.stop(); rallyAudio.stop() }
-            } }
-            add(voiceButton, dp(78), dp(48))
-        })
-
         searchRow = row(8) {
             searchInput = EditText(this@MainActivity).apply {
-                hint = "Destino: localidad, calle o dirección"; setHintTextColor(Color.parseColor("#758A9F"))
+                hint = tr("search_hint"); setHintTextColor(Color.parseColor("#758A9F"))
                 setTextColor(Color.WHITE); textSize = 14f; isSingleLine = true
                 setPadding(dp(12), 0, dp(8), 0); background = shape("#233148", 10)
                 imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
                 setOnEditorActionListener { _, _, _ -> lookupPlace(); true }
             }
             add(searchInput, 0, dp(50), 1f)
-            add(button("BUSCAR", "#116B78", "#FFFFFF").apply { setOnClickListener { lookupPlace() } }, dp(104), dp(50))
+            searchButton = button(tr("search"), "#116B78", "#FFFFFF").apply { setOnClickListener { lookupPlace() } }
+            add(searchButton, dp(104), dp(50))
         }
-        top.addView(searchRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
-        banner = label("GPS buscando señal · mantené pulsado el mapa para elegir destino", 11f, muted)
+        top.addView(searchRow, LinearLayout.LayoutParams(-1, -2))
+        // The destination stays visible even if fresh GPS fixes overwrite the status line.
+        destinationIndicator = label("✓ DESTINO ELEGIDO", 12f, "#ADFFE0", true).apply {
+            visibility = View.GONE
+            isClickable = true
+            background = shape("#103C35", 8, "#2C977E")
+            setPadding(dp(10), dp(8), dp(10), dp(8))
+            setOnClickListener {
+                val fixed = target ?: routeDestination
+                if (fixed != null) {
+                    map?.animateCamera(CameraUpdateFactory.newLatLngZoom(
+                        LatLng(fixed.latitude, fixed.longitude), 16.0), 450)
+                }
+            }
+        }
+        top.addView(destinationIndicator, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(7) })
+        banner = label(tr("gps"), 11f, muted)
+        banner.visibility = View.GONE
         top.addView(banner, LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(8) })
 
         noteAccent = View(this).apply { setBackgroundColor(Color.parseColor(sky)) }
         noteBadge = label("PACENOTE", 11f, sky, true).apply {
             gravity = Gravity.CENTER_VERTICAL
         }
-        noteTitle = label("ELEGÍ UN DESTINO", 21f, white, true).apply {
+        noteTitle = label(tr("dest"), 21f, white, true).apply {
             setSingleLine(false)
         }
-        noteDetail = label("Se crearán las notas 1–6 automáticamente", 11.5f, muted).apply {
+        noteDetail = label(tr("dest_sub"), 11.5f, muted).apply {
             maxLines = 2
         }
         primaryNoteTile = RallyNoteTile(this).apply { visibility = View.GONE }
@@ -299,17 +501,45 @@ class MainActivity : Activity(), LocationListener {
         val noteWords = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_VERTICAL
-            addView(noteBadge, LinearLayout.LayoutParams(-1, -2))
-            addView(noteTitle, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(3) })
+            // The heading is redundant (NOTA DE RALLY): leave only the turn direction.
+            addView(noteTitle, LinearLayout.LayoutParams(-1, -2))
             addView(noteDetail, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4) })
         }
-        val noteContent = LinearLayout(this).apply {
+        // Large next-bend distance follows familiar navigation hierarchy: number first,
+        // unit secondary, pacenote directly underneath (instead of a thin text badge).
+        distanceNumber = label("0", 39f, white, true).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            includeFontPadding = false
+            setTypeface(Typeface.DEFAULT, Typeface.BOLD)
+        }
+        distanceUnit = label("m", 18f, muted, true).apply {
+            gravity = Gravity.BOTTOM
+            setPadding(0, 0, 0, dp(6))
+        }
+        nextTurnDistance = row(7) {
+            add(distanceNumber, -2, dp(51))
+            add(distanceUnit, -2, dp(51))
+            nextCurveCaption = label(tr("next"), 10f, muted, true).apply {
+                gravity = Gravity.RIGHT or Gravity.CENTER_VERTICAL
+            }
+            add(nextCurveCaption, 0, dp(48), 1f)
+        }.apply {
+            visibility = View.GONE
+            setPadding(dp(3), dp(1), dp(3), dp(8))
+            contentDescription = "Distancia hasta la próxima curva"
+        }
+        val paceRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(10), dp(10), dp(10), dp(10))
             addView(primaryNoteTile, LinearLayout.LayoutParams(dp(78), dp(78)).apply { marginEnd = dp(10) })
             addView(noteWords, LinearLayout.LayoutParams(0, -2, 1f))
             addView(linkedNoteColumn, LinearLayout.LayoutParams(dp(66), -2).apply { marginStart = dp(6) })
+        }
+        val noteContent = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(10), dp(7), dp(10), dp(10))
+            addView(nextTurnDistance, LinearLayout.LayoutParams(-1, -2))
+            addView(paceRow, LinearLayout.LayoutParams(-1, -2))
         }
         noteCard = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -318,7 +548,7 @@ class MainActivity : Activity(), LocationListener {
             addView(noteContent, LinearLayout.LayoutParams(0, -2, 1f))
         }
         top.addView(noteCard, LinearLayout.LayoutParams(-1,-2).apply { topMargin = dp(10) })
-        resetNoteCard(sky, "RALLY GPS AI", "ELEGÍ UN DESTINO", "Se crearán las notas 1–6 automáticamente")
+        resetNoteCard(sky, "RALLY GPS AI", tr("dest"), tr("dest_sub"))
 
         root.addView(top, FrameLayout.LayoutParams(-1,-2,Gravity.TOP).apply {
             setMargins(dp(9),dp(8),dp(9),0)
@@ -330,11 +560,17 @@ class MainActivity : Activity(), LocationListener {
             setPadding(dp(12), dp(10), dp(12), dp(12))
             elevation=dp(10).toFloat()
         }
-        info = label("SIN RUTA · GPS", 13f, muted, true).apply { gravity=Gravity.CENTER }
-        bottom.addView(info, LinearLayout.LayoutParams(-1, -2))
+        info = label("SIN RUTA · GPS", 15f, muted, true)
+        tripDistance = label("— km restantes", 18f, white, true).apply {
+            gravity = Gravity.RIGHT or Gravity.CENTER_VERTICAL
+        }
+        bottom.addView(row(12) {
+            add(info, 0, dp(36), 1f)
+            add(tripDistance, -2, dp(36))
+        })
 
         val actionRow = row(8) {
-            action = button("TRAZAR RUTA", "#0E8BA1", "#FFFFFF").also { it.setOnClickListener { mainAction() } }
+            action = button(tr("route"), "#0E8BA1", "#FFFFFF").also { it.setOnClickListener { mainAction() } }
             add(action, 0, dp(52), 1.5f)
             nextButton = button("DEMO", "#463377", "#FFFFFF").also { it.setOnClickListener { startDemo() } }
             add(nextButton, 0, dp(52), 0.8f)
@@ -344,21 +580,88 @@ class MainActivity : Activity(), LocationListener {
         bottom.addView(actionRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(9) })
 
         toolsRow = row(6) {
-            add(button("PUNTOS").apply { setOnClickListener { showPointOptions() } }, 0,dp(46),1f)
+            pointsButton = button(tr("points")).apply { setOnClickListener { showPointOptions() } }
+            add(pointsButton, 0,dp(46),1f)
             add(button("GPX ↓").apply { setOnClickListener { importGpx() } }, 0,dp(46),1f)
             add(button("GPX ↑").apply { setOnClickListener { exportGpx() } }, 0,dp(46),1f)
-            add(button("AJUSTES").apply { setOnClickListener { showSettings() } },0,dp(46),1f)
+            settingsButton = button(tr("settings")).apply { setOnClickListener { showSettings() } }
+            add(settingsButton,0,dp(46),1f)
         }
         bottom.addView(toolsRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+        bottomPanel = bottom
         root.addView(bottom, FrameLayout.LayoutParams(-1,-2,Gravity.BOTTOM).apply {
             setMargins(dp(9),0,dp(9),dp(10) + bottomInset)
         })
+
+        // Floating map controls: bottom-right, directly above the bottom navigation bar.
+        // The note panel no longer wastes vertical room on title, 3D or voice buttons.
+        floatingControls = row(7) {
+            modeButton = button(if (map3d) "3D" else "2D", panel, sky).apply {
+                contentDescription = "Alternar vista 2D y 3D"
+                setOnClickListener { toggle3D() }
+            }
+            add(modeButton, dp(63), dp(48))
+            voiceButton = button(if (voiceOn) tr("voice_on") else tr("voice_off"), panel, sky).apply {
+                contentDescription = "Activar o silenciar el copiloto"
+                setOnClickListener {
+                    voiceOn = !voiceOn
+                    prefs.edit().putBoolean("voice", voiceOn).apply()
+                    voiceButton.text = if (voiceOn) tr("voice_on") else tr("voice_off")
+                    if (!voiceOn) { tts?.stop(); rallyAudio.stop() }
+                }
+            }
+            add(voiceButton, dp(79), dp(48))
+        }.apply {
+            elevation = dp(14).toFloat()
+        }
+        root.addView(floatingControls, FrameLayout.LayoutParams(-2, -2, Gravity.RIGHT or Gravity.BOTTOM).apply {
+            rightMargin = dp(17)
+            bottomMargin = dp(220) + bottomInset
+        })
+        bottom.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> positionFloatingControls() }
+        root.post { positionFloatingControls() }
         setContentView(root)
+    }
+
+    private fun positionFloatingControls() {
+        if (!::floatingControls.isInitialized || !::bottomPanel.isInitialized) return
+        val params = floatingControls.layoutParams as? FrameLayout.LayoutParams ?: return
+        val nextBottomMargin = bottomPanel.height + dp(23) + systemBarInset("navigation_bar_height")
+        if (params.bottomMargin != nextBottomMargin) {
+            params.bottomMargin = nextBottomMargin
+            floatingControls.layoutParams = params
+        }
+    }
+
+    private fun updateDestinationIndicator(summary: String? = null, approximate: Boolean? = null) {
+        if (summary != null) chosenDestinationText = summary.take(45).ifBlank { "PUNTO MARCADO" }
+        if (approximate != null) chosenDestinationApproximate = approximate
+        val point = target ?: routeDestination
+        if (point == null) {
+            destinationIndicator.visibility = View.GONE
+            return
+        }
+        destinationIndicator.visibility = if ((navigating || demo) && !controlsVisible) View.GONE else View.VISIBLE
+        val suffix = if (chosenDestinationApproximate) " · APROXIMADO" else ""
+        destinationIndicator.text = "✓ DESTINO: $chosenDestinationText$suffix  ·  TOCÁ PARA VER"
+        destinationIndicator.setTextColor(Color.parseColor(if (chosenDestinationApproximate) "#FFE49D" else "#ADFFE0"))
+    }
+
+    private fun chooseDestination(point: GeoPoint, name: String, approximate: Boolean = false) {
+        target = point
+        destinationTapArmed = false
+        updateDestinationIndicator(name, approximate)
+        drawWaypoints()
+        status(if (approximate) "Dirección aproximada: verificá el pin en el mapa"
+            else "Destino confirmado · tocá TRAZAR RUTA", approximate)
     }
 
     private fun status(message: String, error: Boolean) {
         banner.text = message
         banner.setTextColor(Color.parseColor(if (error) "#FF907B" else muted))
+        // Do not reserve a permanent status line when a route is already displayed.
+        // Important errors stay visible; normal status stays out of the map.
+        banner.visibility = if (error) View.VISIBLE else View.GONE
     }
     private fun execute(label: String, request: () -> Any?, success: (Any?) -> Unit) {
         status("$label…", false)
@@ -393,9 +696,8 @@ class MainActivity : Activity(), LocationListener {
                 .setTitle("ELEGÍ EL DESTINO CORRECTO")
                 .setItems(entries) { _, index ->
                     val choice = matches[index]
-                    target = choice.point
                     searchInput.setText(name)
-                    drawWaypoints()
+                    chooseDestination(choice.point, choice.address, choice.approximate)
                     map?.animateCamera(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder()
                         .target(LatLng(choice.point.latitude,choice.point.longitude))
                         .zoom(16.0).bearing(0.0).tilt(0.0).build()), 550)
@@ -412,8 +714,9 @@ class MainActivity : Activity(), LocationListener {
             navigationSession++
             reroutePolicy.reset()
             navigating = false; demo = false; tts?.stop(); rallyAudio.stop(); lastSpoken = -1
+            contextualCopilot.reset(); lastPriorityNoteAtMs = -1L
             showDrivingControls(true)
-            action.text = "INICIAR GPS"; nextButton.text = "DEMO"
+            action.text = tr("go"); nextButton.text = "DEMO"
             resetNoteCard("#F0475A", "STOP", "NAVEGACIÓN DETENIDA", "Podés retomar el recorrido o trazar uno nuevo")
             status("Recorrido guardado. Podés retomarlo.", false)
             return
@@ -433,6 +736,8 @@ class MainActivity : Activity(), LocationListener {
                 .putString("last_road_destination", RouteStore.serialize(listOf(destination)))
                 .putString("last_road_stops", RouteStore.serialize(stops)).apply()
             target = null
+            updateDestinationIndicator("DESTINO DE LA RUTA")
+            drawWaypoints()
             status("Ruta calculada. Si te desviás, intentará recalcular con internet.", false)
         }
     }
@@ -444,15 +749,19 @@ class MainActivity : Activity(), LocationListener {
         reroutePolicy.reset()
         routeDestination = null
         pendingStops = emptyList()
+        updateDestinationIndicator()
         if (save) prefs.edit().remove("last_road_destination").remove("last_road_stops").apply()
         plan = parsed; navigator = NavigationEngine(parsed) { warnFactor }; drivingCamera.reset()
+        contextualCopilot.reset(); lastPriorityNoteAtMs = -1L
         positionIndex = 0; lastSpoken = -1; currentNote = 0
         navigating = false; demo = false; demoPosition = 0.0
-        action.text = "INICIAR GPS"; nextButton.text = "DEMO"
+        action.text = tr("go"); nextButton.text = "DEMO"
         showDrivingControls(false)
         val km = "%.1f".format(Locale.US, parsed.totalMetres / 1000.0)
-        resetNoteCard("#22D3EE", "RUTA LISTA", "${parsed.notes.size} NOTAS DETECTADAS", "${km} KM  ·  REVISÁ LAS NOTAS ANTES DE SALIR")
-        info.text = "$km KM  •  ${parsed.notes.size} CURVAS  •  1–6"
+        resetNoteCard("#22D3EE", tr("ready"), parsed.notes.size.toString() + " " + tr("detected"), km + " km · " + tr("dest_sub"))
+        info.text = parsed.notes.size.toString() + " " + tr("detected") + " · 1–6"
+        lastRemainingMetres = parsed.totalMetres
+        tripDistance.text = "$km km " + tr("remaining")
         drawPlan()
         if (save && parsed.points.size <= 30000) prefs.edit().putString("last_route", RouteStore.serialize(parsed.points)).apply()
         val center = parsed.points[parsed.points.size/2]
@@ -466,7 +775,8 @@ class MainActivity : Activity(), LocationListener {
         reroutePolicy.reset()
         navigating = true; demo = false; positionIndex = 0; lastSpoken = -1; currentNote = 0
         navigator?.reset(); drivingCamera.reset(); followRouteCamera = true; showDrivingControls(false)
-        action.text = "FINALIZAR"; nextButton.text = "DEMO"
+        contextualCopilot.reset(); lastPriorityNoteAtMs = -1L
+        action.text = tr("finish"); nextButton.text = "DEMO"
         status("GPS activo · notas estimadas del trazado · respetá la señalización", false)
         lastLocation?.let {
             updateProgress(GeoPoint(it.latitude,it.longitude), it.speed)
@@ -474,7 +784,7 @@ class MainActivity : Activity(), LocationListener {
         }
     }
     private fun startDemo() {
-        if (demo) { demo=false; nextButton.text="DEMO"; action.text="INICIAR GPS"; showDrivingControls(true); return }
+        if (demo) { demo=false; contextualCopilot.reset(); nextButton.text="DEMO"; action.text=tr("go"); showDrivingControls(true); return }
         if (plan == null) {
             val center = gps ?: GeoPoint(-43.249, -65.309)
             setPlan(PaceNotes.synthetic(center), false)
@@ -484,7 +794,8 @@ class MainActivity : Activity(), LocationListener {
         reroutePolicy.reset()
         demo = true; navigating = false; demoPosition = 0.0; positionIndex=0; lastSpoken=-1
         navigator?.reset(); drivingCamera.reset(); followRouteCamera = true; showDrivingControls(false)
-        action.text = "FINALIZAR"; nextButton.text="PAUSA"
+        contextualCopilot.reset(); lastPriorityNoteAtMs = -1L
+        action.text = tr("finish"); nextButton.text=tr("pause")
         val tick = object : Runnable {
             override fun run() {
                 if (!demo) return
@@ -495,7 +806,7 @@ class MainActivity : Activity(), LocationListener {
                 val point = p.points[index]
                 updateProgress(point, demoSpeed.toFloat())
                 drawPosition(point)
-                if (index >= p.points.lastIndex) { demo=false; action.text="INICIAR GPS"; nextButton.text="DEMO"; showDrivingControls(true); return }
+                if (index >= p.points.lastIndex) { demo=false; action.text=tr("go"); nextButton.text="DEMO"; showDrivingControls(true); return }
                 ui.postDelayed(this, 500)
             }
         }
@@ -521,7 +832,10 @@ class MainActivity : Activity(), LocationListener {
         reroutePolicy.observe(false, result.fix.errorM, accuracy, now)
         positionIndex = result.fix.segment.coerceIn(0, route.points.lastIndex)
         val remaining = (route.totalMetres-result.fix.metres).coerceAtLeast(0.0)
-        info.text = "${(speed*3.6).toInt().coerceAtLeast(0)} km/h  •  ${"%.1f".format(Locale.US,remaining/1000)} km restantes"
+        lastRemainingMetres = remaining
+        currentNote = result.noteIndex.coerceAtLeast(0)
+        info.text = "${(speed*3.6).toInt().coerceAtLeast(0)} km/h"
+        tripDistance.text = RallyDistanceFormatter.remaining(remaining) + " " + tr("remaining")
         val next = route.notes.getOrNull(result.noteIndex)
         if (next == null) {
             resetNoteCard("#43D9A6", "FIN", "TRAMO LIMPIO", "SIN NOTAS INMEDIATAS  ·  ATENCIÓN AL CAMINO")
@@ -529,6 +843,7 @@ class MainActivity : Activity(), LocationListener {
             val follow = route.notes.getOrNull(result.noteIndex+1)
             updateNoteCard(next, follow, result.distanceToNoteM)
         }
+        if (result.announcement != null) lastPriorityNoteAtMs = now
         result.announcement?.let { message ->
             if (result.noteIndex >= 0 && !result.arrived) {
                 lastSpoken = result.noteIndex
@@ -539,10 +854,27 @@ class MainActivity : Activity(), LocationListener {
                 } else say(message)
             } else say(message)
         }
+        // A contextual observation never competes with an imminent turn call.
+        // No camera, model downloads or network calls: pure precomputed route geometry.
+        if (!result.arrived && result.announcement == null && voiceOn && speakReady &&
+            (demo || accuracy <= 25f) &&
+            (lastPriorityNoteAtMs < 0 || now - lastPriorityNoteAtMs >= 18_000L) &&
+            tts?.isSpeaking != true && !rallyAudio.isBusy() && !reroutePolicy.isBusy()) {
+            val mode = ContextMode.fromId(prefs.getString("context_commentary_mode", ContextMode.OCCASIONAL.id))
+            val cue = contextualCopilot.evaluate(
+                route, result.fix.metres, speed.toDouble(), now, mode,
+                result.distanceToNoteM, priorityBusy = false
+            )
+            if (cue != null) {
+                contextualCommentIndex++
+                say(RallyLanguage.contextComment(appLanguage, cue, contextualCommentIndex))
+            }
+        }
         if (result.arrived) {
             navigationSession++
+            contextualCopilot.reset()
             reroutePolicy.reset()
-            navigating = false; demo = false; action.text = "INICIAR GPS"
+            navigating = false; demo = false; action.text = tr("go")
             showDrivingControls(true)
         }
     }
@@ -567,6 +899,7 @@ class MainActivity : Activity(), LocationListener {
                     if (session == navigationSession && navigating && !demo && routeDestination == destination && plan === oldPlan) {
                         plan = updated
                         navigator = NavigationEngine(updated) { warnFactor }
+                        contextualCopilot.reset(); lastPriorityNoteAtMs = -1L
                         drivingCamera.reset()
                         lastSpoken = -1
                         pendingStops = stopsAhead
@@ -603,8 +936,8 @@ class MainActivity : Activity(), LocationListener {
                 }
                 speakReady = true
                 val engine = tts ?: return@runOnUiThread
-                val language = engine.setLanguage(Locale("es", "AR"))
-                if (language < TextToSpeech.LANG_AVAILABLE) engine.language = Locale("es", "ES")
+                val language = engine.setLanguage(RallyLanguage.locale(appLanguage))
+                if (language < TextToSpeech.LANG_AVAILABLE && RallyLanguage.isSpanish(appLanguage)) engine.language = Locale("es", "ES")
                 engine.setAudioAttributes(AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
@@ -613,15 +946,15 @@ class MainActivity : Activity(), LocationListener {
         }
     }
 
-    private fun availableSpanishVoices(): List<Voice> = tts?.voices.orEmpty()
-        .filter { it.locale.language == "es" && !it.isNetworkConnectionRequired }
-        .sortedWith(compareBy<Voice> { if (it.locale.country == "AR") 0 else if (it.locale.country == "MX") 1 else 2 }
+    private fun availableLocalizedVoices(): List<Voice> = tts?.voices.orEmpty()
+        .filter { it.locale.language == RallyLanguage.locale(appLanguage).language && !it.isNetworkConnectionRequired }
+        .sortedWith(compareBy<Voice> { if (it.locale.country == RallyLanguage.locale(appLanguage).country) 0 else 1 }
             .thenBy { it.name })
 
     private fun applyVoicePreferences() {
         val engine = tts ?: return
         val savedVoice = prefs.getString("voice_name", null)
-        availableSpanishVoices().firstOrNull { it.name == savedVoice }?.let { engine.setVoice(it) }
+        availableLocalizedVoices().firstOrNull { it.name == savedVoice }?.let { engine.setVoice(it) }
         engine.setSpeechRate(prefs.getFloat("voice_speed", 1.15f))
         engine.setPitch(prefs.getFloat("voice_pitch", 0.96f))
     }
@@ -631,7 +964,7 @@ class MainActivity : Activity(), LocationListener {
             status("Motor de voz iniciándose. Revisá los ajustes TTS del teléfono.", true)
             return
         }
-        val options = availableSpanishVoices()
+        val options = availableLocalizedVoices()
         if (options.isEmpty()) {
             android.app.AlertDialog.Builder(this).setTitle("VOCES EN ESPAÑOL")
                 .setMessage("No hay voces españolas sin conexión instaladas en el motor actual. Instalá voces desde Android, RHVoice o SherpaTTS y elegí ese motor en el sistema.")
@@ -677,10 +1010,9 @@ class MainActivity : Activity(), LocationListener {
     private fun speakRallyNote(note: PaceNote, next: PaceNote?, distance: Double) {
         if (!voiceOn) return
         val mode = prefs.getString("rally_voice_mode", RallyVoicePack.SYSTEM) ?: RallyVoicePack.SYSTEM
-        val phrase = PaceNotes.phrase(note, next)
-        val prefix = if (distance <= 22.0) "Ahora, " else
-            "En ${((distance / 10.0).roundToInt() * 10).coerceIn(20, 400)} metros, "
-        if (mode != RallyVoicePack.SYSTEM) {
+        val phrase = RallyLanguage.call(appLanguage, note, next)
+        val prefix = RallyLanguage.distanceCall(appLanguage, distance) + ", "
+        if (mode != RallyVoicePack.SYSTEM && RallyLanguage.isSpanish(appLanguage)) {
             tts?.stop()
             if (rallyAudio.play(mode, RallyVoicePack.tokens(note, next, distance))) return
             status("Pack de voz no disponible; utilizando voz Android", true)
@@ -689,6 +1021,11 @@ class MainActivity : Activity(), LocationListener {
     }
 
     private fun selectRallyVoiceMode() {
+        if (!RallyLanguage.isSpanish(appLanguage)) {
+            status("Recorded CarlFM clips are Spanish-only; using Android TTS", false)
+            prefs.edit().putString("rally_voice_mode", RallyVoicePack.SYSTEM).apply()
+            return
+        }
         val choices = arrayOf("Voz Android (TTS)", "CarlFM · claro · offline", "CarlFM · radio de rally · offline")
         val modes = RallyVoicePack.modes
         val saved = prefs.getString("rally_voice_mode", RallyVoicePack.SYSTEM) ?: RallyVoicePack.SYSTEM
@@ -769,35 +1106,83 @@ class MainActivity : Activity(), LocationListener {
                 textOffset(arrayOf(0f,-1.55f))))
         }
         drawWaypoints()
+        // Route and bend layers may have been added after the GPS marker.
+        // Recreate the marker layers last, so the vehicle is always above coloured roads.
+        if (s.getSource("rally_me") != null) {
+            for (id in listOf("rally_car_layer", "rally_me_layer", "rally_car_halo")) {
+                if (s.getLayer(id) != null) s.removeLayer(id)
+            }
+            s.addLayer(CircleLayer("rally_car_halo", "rally_me").withProperties(
+                circleColor("#0B2134"), circleRadius(24f), circleOpacity(0.72f),
+                circleStrokeColor("#79E6FF"), circleStrokeWidth(2.4f)))
+            s.addLayer(CircleLayer("rally_me_layer", "rally_me").withProperties(
+                circleColor(sky), circleRadius(11f),
+                circleStrokeColor("#FFFFFF"), circleStrokeWidth(3f)))
+            updateVehicleLayers()
+        }
     }
     private fun drawWaypoints() {
-        val s = map?.style ?: return
-        val points = mutableListOf<Feature>()
-        chosenOrigin?.let { points.add(Feature.fromGeometry(Point.fromLngLat(it.longitude,it.latitude)).apply { addStringProperty("label","ORIGEN") }) }
-        target?.let { points.add(Feature.fromGeometry(Point.fromLngLat(it.longitude,it.latitude)).apply { addStringProperty("label","DESTINO") }) }
-        intermediatePoints.forEachIndexed { i,p ->
-            points.add(Feature.fromGeometry(Point.fromLngLat(p.longitude,p.latitude)).apply { addStringProperty("label","VÍA ${i+1}") })
+        val style = map?.style ?: return
+        val markers = mutableListOf<Feature>()
+        fun pointMarker(point: GeoPoint, name: String, tone: String) {
+            markers.add(Feature.fromGeometry(Point.fromLngLat(point.longitude,point.latitude)).apply {
+                addStringProperty("label", name)
+                addStringProperty("tone", tone)
+            })
         }
-        val features = FeatureCollection.fromFeatures(points)
-        val source = s.getSourceAs<GeoJsonSource>("rally_waypoints")
+        chosenOrigin?.let { pointMarker(it,"ORIGEN","#46C8EA") }
+        // A calculated road route retains the destination pin after target is cleared.
+        (target ?: routeDestination)?.let { pointMarker(it,"DESTINO","#43D9A6") }
+        intermediatePoints.forEachIndexed { index,p ->
+            pointMarker(p,"VÍA ${index+1}","#F3D14A")
+        }
+        val collection = FeatureCollection.fromFeatures(markers)
+        val source = style.getSourceAs<GeoJsonSource>("rally_waypoints")
         if (source == null) {
-            s.addSource(GeoJsonSource("rally_waypoints", features))
-            s.addLayer(CircleLayer("rally_waypoints_circles", "rally_waypoints").withProperties(
-                circleColor("#43D9A6"), circleRadius(7f), circleStrokeColor("#FFFFFF"), circleStrokeWidth(2f)))
-            s.addLayer(SymbolLayer("rally_waypoints_labels", "rally_waypoints").withProperties(
+            style.addSource(GeoJsonSource("rally_waypoints",collection))
+            style.addLayer(CircleLayer("rally_waypoints_circles","rally_waypoints").withProperties(
+                circleColor(Expression.get("tone")), circleRadius(8f),
+                circleStrokeColor("#FFFFFF"), circleStrokeWidth(2f)))
+            style.addLayer(SymbolLayer("rally_waypoints_labels","rally_waypoints").withProperties(
                 textField(Expression.get("label")), textSize(12f), textColor("#FFFFFF"),
-                textHaloColor("#111827"), textHaloWidth(2f), textOffset(arrayOf(0f, -1.8f))))
-        } else source.setGeoJson(features)
+                textHaloColor("#111827"), textHaloWidth(2f),
+                textOffset(arrayOf(0f,-1.8f))))
+        } else source.setGeoJson(collection)
     }
+
+    /**
+     * Real-position map marker: the Subaru's hood always points in the actual driving
+     * direction (route tangent in DEMO, reliable GPS heading otherwise).
+     */
+    private fun carBearing(point: GeoPoint): Float {
+        val route = plan
+        if ((navigating || demo) && route != null && route.points.size >= 2) {
+            val metres = if (demo) demoPosition else navigator?.locate(point)?.metres ?: 0.0
+            val a = DrivingCamera.pointAt(route, (metres - 4.0).coerceAtLeast(0.0))
+            val b = DrivingCamera.pointAt(route, (metres + 20.0).coerceAtMost(route.totalMetres))
+            if (DrivingCamera.distance(a,b) >= 1.0) return DrivingCamera.bearing(a,b).toFloat()
+        }
+        return if (lastLocation?.hasBearing() == true) lastLocation!!.bearing else 0f
+    }
+
     private fun drawPosition(p: GeoPoint) {
-        val s = map?.style ?: return
-        val f = Feature.fromGeometry(Point.fromLngLat(p.longitude,p.latitude))
-        val source = s.getSourceAs<GeoJsonSource>("rally_me")
+        val style = map?.style ?: return
+        val point = Feature.fromGeometry(Point.fromLngLat(p.longitude, p.latitude))
+        val source = style.getSourceAs<GeoJsonSource>("rally_me")
         if (source == null) {
-            s.addSource(GeoJsonSource("rally_me",f))
-            s.addLayer(CircleLayer("rally_me_layer","rally_me").withProperties(
-                circleColor(sky),circleRadius(9f),circleStrokeColor("#FFFFFF"),circleStrokeWidth(3f)))
-        } else source.setGeoJson(f)
+            style.addSource(GeoJsonSource("rally_me", point))
+            style.addLayer(CircleLayer("rally_car_halo", "rally_me").withProperties(
+                circleColor("#0B2134"), circleRadius(24f), circleOpacity(0.72f),
+                circleStrokeColor("#79E6FF"), circleStrokeWidth(2.4f)))
+            // Classic GPS dot remains available if selected or if bitmap decoding fails.
+            style.addLayer(CircleLayer("rally_me_layer", "rally_me").withProperties(
+                circleColor(sky), circleRadius(11f),
+                circleStrokeColor("#FFFFFF"), circleStrokeWidth(3f)))
+        } else {
+            source.setGeoJson(point)
+        }
+        updateVehicleLayers()
+        style.getLayerAs<SymbolLayer>("rally_car_layer")?.setProperties(iconRotate(carBearing(p)))
         if ((navigating || demo) && followRouteCamera) {
             val route = plan ?: return
             val progressM = if (demo) demoPosition else navigator?.locate(p)?.metres ?: 0.0
@@ -807,8 +1192,156 @@ class MainActivity : Activity(), LocationListener {
                 .target(LatLng(pose.focus.latitude, pose.focus.longitude))
                 .zoom(pose.zoom).tilt(pose.tilt).bearing(pose.bearing).build()), if (demo) 430 else 650)
         }
-
     }
+
+    /**
+     * Switch map sprite in place. All bitmaps face geographic north before rotation,
+     * including the selected vehicle's thumbnail in the chooser.
+     */
+    private fun updateVehicleLayers() {
+        val style = map?.style ?: return
+        if (style.getSource("rally_me") == null) return
+        val selected = RallyVehicles.selectedId(prefs)
+        var activeCar = selected != RallyVehicles.DOT
+        if (activeCar) {
+            val bitmap = runCatching { RallyVehicles.marker(selected) }.getOrNull()
+            if (bitmap != null) {
+                val imageKey = "rally_vehicle_" + selected
+                if (vehicleImageStyle !== style) {
+                    vehicleImageStyle = style
+                    vehicleImageKeys.clear()
+                }
+                if (vehicleImageKeys.add(imageKey)) {
+                    style.addImage(imageKey, bitmap)
+                }
+                val setting = prefs.getString("vehicle_marker_size", "large")
+                val size = when (setting) {
+                    "normal" -> if (selected == RallyVehicles.DEFAULT) 1.9f else 1.55f
+                    "xl" -> if (selected == RallyVehicles.DEFAULT) 3.7f else 3.0f
+                    else -> if (selected == RallyVehicles.DEFAULT) 2.85f else 2.35f
+                }
+                val bearing = (if (demo) plan?.points?.getOrNull(positionIndex) else gps)
+                    ?.let { carBearing(it) } ?: 0f
+                val layer = style.getLayerAs<SymbolLayer>("rally_car_layer")
+                if (layer == null) {
+                    style.addLayer(SymbolLayer("rally_car_layer", "rally_me").withProperties(
+                        iconImage(imageKey),
+                        iconSize(size),
+                        iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_MAP),
+                        iconAllowOverlap(true), iconIgnorePlacement(true),
+                        iconRotate(bearing)))
+                } else {
+                    layer.setProperties(iconImage(imageKey), iconSize(size),
+                        iconRotate(bearing), visibility(Property.VISIBLE))
+                }
+            } else activeCar = false
+        }
+        val radius = when (prefs.getString("vehicle_marker_size", "large")) {
+            "normal" -> 19f
+            "xl" -> 39f
+            else -> 29f
+        }
+        style.getLayerAs<CircleLayer>("rally_car_halo")?.setProperties(
+            circleRadius(radius),
+            visibility(if (activeCar) Property.VISIBLE else Property.NONE))
+        style.getLayer("rally_car_layer")?.setProperties(
+            visibility(if (activeCar) Property.VISIBLE else Property.NONE))
+        style.getLayer("rally_me_layer")?.setProperties(
+            visibility(if (activeCar) Property.NONE else Property.VISIBLE))
+    }
+
+    private fun selectVehicleMarkerSize() {
+        val sizes = listOf("normal", "large", "xl")
+        val labels = arrayOf(tr("size_normal"), tr("size_large"), tr("size_xl"))
+        val current = prefs.getString("vehicle_marker_size", "large")
+        android.app.AlertDialog.Builder(this).setTitle(tr("vehicle_size"))
+            .setSingleChoiceItems(labels, sizes.indexOf(current).coerceAtLeast(1)) { dialog, which ->
+                prefs.edit().putString("vehicle_marker_size", sizes[which]).apply()
+                updateVehicleLayers()
+                dialog.dismiss()
+            }
+            .setNegativeButton(tr("back"), null).show()
+    }
+
+    /** Real, scrollable, offline image gallery; selection persists across app restarts. */
+    private fun selectVehicleMarker() {
+        val selectedBefore = RallyVehicles.selectedId(prefs)
+        val scroll = ScrollView(this).apply {
+            isFillViewport = false
+            setBackgroundColor(Color.parseColor("#0D1524"))
+        }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(8), dp(12), dp(12))
+        }
+        val intro = label("Seleccioná tu vehículo para el mapa GPS y la DEMO.", 13f, muted)
+        content.addView(intro, LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(10) })
+        lateinit var dialog: android.app.AlertDialog
+        var lastGroup = ""
+        for (chunk in RallyVehicles.models.groupBy { it.group }) {
+            val groupName = chunk.key
+            if (groupName != lastGroup) {
+                content.addView(label(groupName.uppercase(Locale.ROOT), 12f, sky, true),
+                    LinearLayout.LayoutParams(-1,dp(32)))
+                lastGroup = groupName
+            }
+            for (rowModels in chunk.value.chunked(3)) {
+                val vehicleRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+                for (model in rowModels) {
+                    val active = model.id == selectedBefore
+                    val tile = LinearLayout(this).apply {
+                        orientation = LinearLayout.VERTICAL
+                        gravity = Gravity.CENTER_HORIZONTAL
+                        setPadding(dp(5), dp(7), dp(5), dp(7))
+                        background = shape(if (active) "#16364C" else "#172336", 10,
+                            if (active) "#22D3EE" else "#283F59")
+                        isClickable = true
+                        isFocusable = true
+                        contentDescription = model.name + if (active) ", seleccionado" else ""
+                    }
+                    val image = ImageView(this).apply {
+                        scaleType = ImageView.ScaleType.FIT_CENTER
+                        setImageBitmap(RallyVehicles.preview(model.id))
+                        contentDescription = model.name + ", vista superior"
+                    }
+                    tile.addView(image, LinearLayout.LayoutParams(dp(60), dp(76)))
+                    val text = label(model.name, 11f, white, true).apply {
+                        gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                        textAlignment = View.TEXT_ALIGNMENT_CENTER
+                        maxLines = 2
+                        ellipsize = android.text.TextUtils.TruncateAt.END
+                    }
+                    tile.addView(text, LinearLayout.LayoutParams(-1, dp(39)).apply { topMargin=dp(3) })
+                    tile.setOnClickListener {
+                        prefs.edit()
+                            .putString(RallyVehicles.KEY, model.id)
+                            .putBoolean("subaru_marker", model.id != RallyVehicles.DOT)
+                            .apply()
+                        updateVehicleLayers()
+                        status("Vehículo GPS: " + model.name, false)
+                        dialog.dismiss()
+                    }
+                    vehicleRow.addView(tile, LinearLayout.LayoutParams(0,dp(136),1f).apply {
+                        marginStart=dp(3); marginEnd=dp(3); bottomMargin=dp(7)
+                    })
+                }
+                repeat(3 - rowModels.size) {
+                    vehicleRow.addView(View(this), LinearLayout.LayoutParams(0,dp(136),1f))
+                }
+                content.addView(vehicleRow,LinearLayout.LayoutParams(-1,-2))
+            }
+        }
+        scroll.addView(content)
+        dialog = android.app.AlertDialog.Builder(this).setTitle("ELEGIR VEHÍCULO GPS")
+            .setView(scroll)
+            .setNegativeButton("CERRAR",null)
+            .create()
+        dialog.show()
+        dialog.window?.setLayout(
+            android.view.WindowManager.LayoutParams.MATCH_PARENT,
+            (resources.displayMetrics.heightPixels * 0.81f).toInt())
+    }
+
     private fun drawLocation() { gps?.let { drawPosition(it) } }
     private fun toggle3D() {
         map3d = !map3d
@@ -905,14 +1438,16 @@ class MainActivity : Activity(), LocationListener {
         }
     }
     private fun showPointOptions() {
-        val choices = arrayOf("Señalar destino en mapa", "Señalar origen en mapa", "Agregar parada intermedia",
-            "Usar GPS como origen", "Borrar todas las paradas")
-        android.app.AlertDialog.Builder(this).setTitle("ORIGEN · DESTINO · PARADAS")
+        val choices = arrayOf(tr("destination_point"), tr("origin_point"), tr("via_point"),
+            tr("gps_origin"), tr("clear_stops"))
+        android.app.AlertDialog.Builder(this).setTitle(tr("points_title"))
             .setItems(choices) { _, index ->
                 when (index) {
                     0, 1, 2 -> {
                         mapSelectMode = when(index) { 1 -> 1; 2 -> 2; else -> 0 }
-                        status("Mantené pulsado el punto elegido en el mapa", false)
+                        destinationTapArmed = index == 0
+                        status(if (index == 0) "Tocá el punto en el mapa para marcar destino" else
+                            "Mantené pulsado el punto elegido en el mapa", false)
                     }
                     3 -> { chosenOrigin = null; drawWaypoints(); status("Origen: GPS actual", false) }
                     4 -> { intermediatePoints.clear(); drawWaypoints(); status("Paradas eliminadas", false) }
@@ -923,33 +1458,117 @@ class MainActivity : Activity(), LocationListener {
         controlsVisible = show
         searchRow.visibility = if (navigating || demo) { if (show) View.VISIBLE else View.GONE } else View.VISIBLE
         toolsRow.visibility = if (navigating || demo) { if (show) View.VISIBLE else View.GONE } else View.VISIBLE
+        updateDestinationIndicator()
     }
 
-    private fun showSettings() {
-        val names=arrayOf("Aviso corto (4 s)","Aviso normal (7 s)","Aviso anticipado (10 s)",
-            "Volver a escuchar una nota", "Mostrar notas completas", "Elegir voz de copiloto", "Probar voz de rally", "Elegir voz TTS Android", "Velocidad y tono TTS", "Instalar/cambiar motor TTS", "Licencias de voz")
-        android.app.AlertDialog.Builder(this).setTitle("COPILOTO · AJUSTES")
-            .setItems(names) { _, i ->
-                if(i in 0..2) { warnFactor=i; prefs.edit().putInt("anticipation",i).apply();status("Anticipación: ${names[i]}",false) }
-                if(i==3) plan?.notes?.getOrNull(lastSpoken)?.let {
-                    speakRallyNote(it, plan?.notes?.getOrNull(lastSpoken+1), 50.0)
+    private fun selectContextualMode() {
+        val modes = listOf(ContextMode.OFF, ContextMode.OCCASIONAL, ContextMode.TALKATIVE)
+        val labels = arrayOf(tr("context_off"), tr("context_occasional"), tr("context_talkative"))
+        val saved = ContextMode.fromId(prefs.getString("context_commentary_mode", ContextMode.OCCASIONAL.id))
+        android.app.AlertDialog.Builder(this)
+            .setTitle(tr("context_menu"))
+            .setSingleChoiceItems(labels, modes.indexOf(saved)) { dialog, which ->
+                val selected = modes[which]
+                prefs.edit().putString("context_commentary_mode", selected.id).apply()
+                contextualCopilot.reset()
+                status(tr("context_menu") + ": " + labels[which], false)
+                dialog.dismiss()
+            }
+            .setNeutralButton(tr("test_voice")) { _, _ ->
+                if (voiceOn && speakReady && !navigating && !demo) {
+                    val preview = ContextCue(ContextKind.WINDING, "preview")
+                    say(RallyLanguage.contextComment(appLanguage, preview))
+                } else if (navigating || demo) {
+                    status("Probá la voz con el recorrido detenido", false)
+                } else {
+                    status("Activá la voz del copiloto para escuchar la prueba", false)
                 }
-                if (i==5) selectRallyVoiceMode()
-                if (i==6) previewRallyVoice()
-                if (i==7) chooseVoice()
-                if (i==8) adjustVoice()
-                if (i==9) openTtsSettings()
-                if (i==10) android.app.AlertDialog.Builder(this).setTitle("LICENCIAS")
-                    .setMessage("CarlFM (es-ES) · rhasspy/piper-voices · MIT. Dataset: dominio público. El modelo y el sintetizador no están incluidos, solo audios OGG. Más datos en github.com/maxijones012/RallyNotes/blob/main/docs/VOICE_LICENSES.md")
-                    .setPositiveButton("CERRAR",null).show()
-                if(i==4) {
-                    val text=plan?.notes?.mapIndexed { j,n -> "${j+1}. ${n.metresFromStart.toInt()} m: ${PaceNotes.phrase(n)}" }?.joinToString("\n")
-                        ?: "Todavía no hay un recorrido"
-                    android.app.AlertDialog.Builder(this).setTitle("LISTA DE NOTAS · ESTIMADAS")
-                        .setMessage(text.take(14000)).setPositiveButton("CERRAR",null).show()
-                }
-            }.setNegativeButton("CERRAR",null).show()
+            }
+            .setNegativeButton(tr("settings"), null).show()
     }
+
+    /** Four understandable sections instead of a long, undifferentiated list. */
+    private fun showSettings() {
+        val sections = arrayOf(
+            tr("settings_nav") + "\n" + tr("settings_nav_desc"),
+            tr("settings_voice") + "\n" + tr("settings_voice_desc"),
+            tr("settings_map") + "\n" + tr("settings_map_desc"),
+            tr("settings_app") + "\n" + tr("settings_app_desc")
+        )
+        android.app.AlertDialog.Builder(this).setTitle(tr("settings"))
+            .setItems(sections) { _, section -> showSettingsSection(section) }
+            .setNegativeButton(tr("back"), null).show()
+    }
+
+    private fun showSettingsSection(section: Int) {
+        val indices: List<Int> = when (section) {
+            0 -> listOf(0,1,2,3,4)
+            1 -> listOf(5,6,13,7,8,9)
+            2 -> listOf(11,14)
+            else -> listOf(12,10)
+        }
+        val labelFor: (Int) -> String = { index ->
+            when (index) {
+                0 -> tr("warn_short")
+                1 -> tr("warn_normal")
+                2 -> tr("warn_early")
+                3 -> tr("repeat")
+                4 -> tr("all_notes")
+                5 -> tr("copilot")
+                6 -> tr("test_voice")
+                7 -> tr("android_voice")
+                8 -> tr("pitch")
+                9 -> tr("engine")
+                10 -> tr("licenses")
+                11 -> tr("vehicle")
+                12 -> tr("change")
+                13 -> tr("context_menu")
+                14 -> tr("vehicle_size")
+                else -> ""
+            }
+        }
+        val names = indices.map { i ->
+            val selected = if (i == warnFactor) "✓  " else ""
+            selected + labelFor(i)
+        }.toTypedArray()
+        val titles = arrayOf(tr("settings_nav"),tr("settings_voice"),tr("settings_map"),tr("settings_app"))
+        android.app.AlertDialog.Builder(this).setTitle(titles.getOrElse(section) { tr("settings") })
+            .setItems(names) { _, which -> handleSettingsOption(indices[which]) }
+            .setNegativeButton(tr("back")) { _, _ -> showSettings() }.show()
+    }
+
+    private fun handleSettingsOption(index: Int) {
+        when (index) {
+            0,1,2 -> {
+                warnFactor = index
+                prefs.edit().putInt("anticipation", index).apply()
+                status("Anticipación: " + arrayOf(tr("warn_short"),tr("warn_normal"),tr("warn_early"))[index],false)
+            }
+            3 -> plan?.notes?.getOrNull(lastSpoken)?.let {
+                speakRallyNote(it,plan?.notes?.getOrNull(lastSpoken+1),50.0)
+            }
+            4 -> {
+                val text = plan?.notes?.mapIndexed { j,n ->
+                    "${j+1}. ${n.metresFromStart.toInt()} m: ${PaceNotes.phrase(n)}"
+                }?.joinToString("\n") ?: "Todavía no hay un recorrido"
+                android.app.AlertDialog.Builder(this).setTitle(tr("all_notes"))
+                    .setMessage(text.take(14000)).setPositiveButton(tr("back"),null).show()
+            }
+            5 -> selectRallyVoiceMode()
+            6 -> previewRallyVoice()
+            7 -> chooseVoice()
+            8 -> adjustVoice()
+            9 -> openTtsSettings()
+            10 -> android.app.AlertDialog.Builder(this).setTitle(tr("licenses"))
+                .setMessage("CarlFM · rhasspy/piper-voices · MIT. Los audios OGG se generaron con datos declarados de dominio público. Ver docs/VOICE_LICENSES.md en GitHub.")
+                .setPositiveButton(tr("back"),null).show()
+            11 -> selectVehicleMarker()
+            12 -> showWelcomeSetup(firstRun = false)
+            13 -> selectContextualMode()
+            14 -> selectVehicleMarkerSize()
+        }
+    }
+
     override fun onStart() { super.onStart();mapView.onStart() }
     override fun onResume() {
         super.onResume(); mapView.onResume()

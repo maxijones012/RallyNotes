@@ -17,7 +17,13 @@ class RallyNotePresentationTest {
     }
 
     @Test fun distanceIsRoundedAndDoesNotGoNegative() {
-        assertEquals("EN 120 M", RallyNotePresentation.render(note(), null, 117.0).distanceLabel)
+        assertEquals("120 m", RallyNotePresentation.render(note(), null, 117.0).distanceLabel)
+        val ahead = RallyNotePresentation.render(note(), null, 1_880.0)
+        assertEquals("1,9", ahead.distanceValue)
+        assertEquals("km", ahead.distanceUnit)
+        val close = RallyNotePresentation.render(note(), null, 82.0)
+        assertEquals("80", close.distanceValue)
+        assertEquals("m", close.distanceUnit)
         assertEquals("AHORA", RallyNotePresentation.render(note(), null, -12.0).distanceLabel)
         assertEquals("AHORA", RallyNotePresentation.render(note(), null, 18.0).distanceLabel)
     }
