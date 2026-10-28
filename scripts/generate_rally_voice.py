@@ -44,7 +44,16 @@ def spanish_number(num: int) -> str:
         return 'doscientos' if num == 200 else f'doscientos {spanish_number(num-200)}'
     if num < 400:
         return 'trescientos' if num == 300 else f'trescientos {spanish_number(num-300)}'
-    return 'cuatrocientos'
+    if num < 1000:
+        hundreds = {
+            400: 'cuatrocientos', 500: 'quinientos', 600: 'seiscientos',
+            700: 'setecientos', 800: 'ochocientos', 900: 'novecientos',
+        }
+        base = (num // 100) * 100
+        return hundreds[base] if base == num else f'{hundreds[base]} {spanish_number(num-base)}'
+    if num == 1000:
+        return 'mil'
+    raise ValueError(f'Distancia de voz fuera del rango: {num}'
 
 
 def required_text() -> dict[str, str]:
@@ -60,7 +69,9 @@ def required_text() -> dict[str, str]:
         result[f'abre_a_{grade}'] = f'abre a {name}'
     for distance in range(20, 401, 10):
         result[f'dist_{distance}'] = spanish_number(distance)
-    assert len(result) == 70, len(result)
+    for distance in range(500, 1001, 100):
+        result[f'dist_{distance}'] = spanish_number(distance)
+    assert len(result) == 76, len(result)
     return result
 
 
