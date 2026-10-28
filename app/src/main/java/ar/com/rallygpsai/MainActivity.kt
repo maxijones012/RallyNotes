@@ -119,6 +119,8 @@ class MainActivity : Activity(), LocationListener {
     private lateinit var gpsButton: TextView
     private lateinit var modeButton: TextView
     private lateinit var voiceButton: TextView
+    private lateinit var floatingControls: LinearLayout
+    private lateinit var bottomPanel: LinearLayout
     private lateinit var nextButton: TextView
     private val bg = "#0F1726"
     private val panel = "#172336"
@@ -444,19 +446,6 @@ class MainActivity : Activity(), LocationListener {
             background = shape(bg, 16, "#294561")
             elevation = dp(10).toFloat()
         }
-        top.add(row(8) {
-            add(label("◢", 23f, sky, true), dp(27))
-            add(label("RALLY GPS AI", 16f, white, true), 0, -2, 1f)
-            modeButton = button("3D", panel, sky).also { it.setOnClickListener { toggle3D() } }
-            add(modeButton, dp(56), dp(48))
-            voiceButton = button(if (voiceOn) tr("voice_on") else tr("voice_off"), panel, sky).also { it.setOnClickListener {
-                voiceOn = !voiceOn; prefs.edit().putBoolean("voice", voiceOn).apply()
-                it as TextView; it.text = if (voiceOn) tr("voice_on") else tr("voice_off")
-                if (!voiceOn) { tts?.stop(); rallyAudio.stop() }
-            } }
-            add(voiceButton, dp(78), dp(48))
-        })
-
         searchRow = row(8) {
             searchInput = EditText(this@MainActivity).apply {
                 hint = tr("search_hint"); setHintTextColor(Color.parseColor("#758A9F"))
@@ -469,7 +458,7 @@ class MainActivity : Activity(), LocationListener {
             searchButton = button(tr("search"), "#116B78", "#FFFFFF").apply { setOnClickListener { lookupPlace() } }
             add(searchButton, dp(104), dp(50))
         }
-        top.addView(searchRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
+        top.addView(searchRow, LinearLayout.LayoutParams(-1, -2))
         // The destination stays visible even if fresh GPS fixes overwrite the status line.
         destinationIndicator = label("✓ DESTINO ELEGIDO", 12f, "#ADFFE0", true).apply {
             visibility = View.GONE
@@ -486,6 +475,7 @@ class MainActivity : Activity(), LocationListener {
         }
         top.addView(destinationIndicator, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(7) })
         banner = label(tr("gps"), 11f, muted)
+        banner.visibility = View.GONE
         top.addView(banner, LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(8) })
 
         noteAccent = View(this).apply { setBackgroundColor(Color.parseColor(sky)) }
@@ -598,10 +588,49 @@ class MainActivity : Activity(), LocationListener {
             add(settingsButton,0,dp(46),1f)
         }
         bottom.addView(toolsRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+        bottomPanel = bottom
         root.addView(bottom, FrameLayout.LayoutParams(-1,-2,Gravity.BOTTOM).apply {
             setMargins(dp(9),0,dp(9),dp(10) + bottomInset)
         })
+
+        // Floating map controls: bottom-right, directly above the bottom navigation bar.
+        // The note panel no longer wastes vertical room on title, 3D or voice buttons.
+        floatingControls = row(7) {
+            modeButton = button(if (map3d) "3D" else "2D", panel, sky).apply {
+                contentDescription = "Alternar vista 2D y 3D"
+                setOnClickListener { toggle3D() }
+            }
+            add(modeButton, dp(63), dp(48))
+            voiceButton = button(if (voiceOn) tr("voice_on") else tr("voice_off"), panel, sky).apply {
+                contentDescription = "Activar o silenciar el copiloto"
+                setOnClickListener {
+                    voiceOn = !voiceOn
+                    prefs.edit().putBoolean("voice", voiceOn).apply()
+                    voiceButton.text = if (voiceOn) tr("voice_on") else tr("voice_off")
+                    if (!voiceOn) { tts?.stop(); rallyAudio.stop() }
+                }
+            }
+            add(voiceButton, dp(79), dp(48))
+        }.apply {
+            elevation = dp(14).toFloat()
+        }
+        root.addView(floatingControls, FrameLayout.LayoutParams(-2, -2, Gravity.RIGHT or Gravity.BOTTOM).apply {
+            rightMargin = dp(17)
+            bottomMargin = dp(220) + bottomInset
+        })
+        bottom.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> positionFloatingControls() }
+        root.post { positionFloatingControls() }
         setContentView(root)
+    }
+
+    private fun positionFloatingControls() {
+        if (!::floatingControls.isInitialized || !::bottomPanel.isInitialized) return
+        val params = floatingControls.layoutParams as? FrameLayout.LayoutParams ?: return
+        val nextBottomMargin = bottomPanel.height + dp(23) + systemBarInset("navigation_bar_height")
+        if (params.bottomMargin != nextBottomMargin) {
+            params.bottomMargin = nextBottomMargin
+            floatingControls.layoutParams = params
+        }
     }
 
     private fun updateDestinationIndicator(summary: String? = null, approximate: Boolean? = null) {
@@ -631,8 +660,8 @@ class MainActivity : Activity(), LocationListener {
         banner.text = message
         banner.setTextColor(Color.parseColor(if (error) "#FF907B" else muted))
         // Do not reserve a permanent status line when a route is already displayed.
-        banner.visibility = if (error || (plan == null && !navigating && !demo))
-            View.VISIBLE else View.GONE
+        // Important errors stay visible; normal status stays out of the map.
+        banner.visibility = if (error) View.VISIBLE else View.GONE
     }
     private fun execute(label: String, request: () -> Any?, success: (Any?) -> Unit) {
         status("$label…", false)
