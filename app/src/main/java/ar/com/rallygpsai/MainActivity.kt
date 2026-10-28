@@ -1487,36 +1487,88 @@ class MainActivity : Activity(), LocationListener {
             .setNegativeButton(tr("settings"), null).show()
     }
 
+    /** Four understandable sections instead of a long, undifferentiated list. */
     private fun showSettings() {
-        val names=arrayOf(tr("warn_short"), tr("warn_normal"), tr("warn_early"),
-            tr("repeat"), tr("all_notes"), tr("copilot"), tr("test_voice"),
-            tr("android_voice"), tr("pitch"), tr("engine"), tr("licenses"),
-            tr("vehicle"), tr("change"), tr("context_menu"))
-        android.app.AlertDialog.Builder(this).setTitle("COPILOTO · " + tr("settings"))
-            .setItems(names) { _, i ->
-                if(i in 0..2) { warnFactor=i; prefs.edit().putInt("anticipation",i).apply();status("Anticipación: ${names[i]}",false) }
-                if(i==3) plan?.notes?.getOrNull(lastSpoken)?.let {
-                    speakRallyNote(it, plan?.notes?.getOrNull(lastSpoken+1), 50.0)
-                }
-                if (i==5) selectRallyVoiceMode()
-                if (i==6) previewRallyVoice()
-                if (i==7) chooseVoice()
-                if (i==8) adjustVoice()
-                if (i==9) openTtsSettings()
-                if (i==11) selectVehicleMarker()
-                if (i==12) showWelcomeSetup(firstRun = false)
-                if (i==13) selectContextualMode()
-                if (i==10) android.app.AlertDialog.Builder(this).setTitle("LICENCIAS")
-                    .setMessage("CarlFM (es-ES) · rhasspy/piper-voices · MIT. Dataset: dominio público. El modelo y el sintetizador no están incluidos, solo audios OGG. Más datos en github.com/maxijones012/RallyNotes/blob/main/docs/VOICE_LICENSES.md")
-                    .setPositiveButton("CERRAR",null).show()
-                if(i==4) {
-                    val text=plan?.notes?.mapIndexed { j,n -> "${j+1}. ${n.metresFromStart.toInt()} m: ${PaceNotes.phrase(n)}" }?.joinToString("\n")
-                        ?: "Todavía no hay un recorrido"
-                    android.app.AlertDialog.Builder(this).setTitle("LISTA DE NOTAS · ESTIMADAS")
-                        .setMessage(text.take(14000)).setPositiveButton("CERRAR",null).show()
-                }
-            }.setNegativeButton("CERRAR",null).show()
+        val sections = arrayOf(
+            tr("settings_nav") + "\n" + tr("settings_nav_desc"),
+            tr("settings_voice") + "\n" + tr("settings_voice_desc"),
+            tr("settings_map") + "\n" + tr("settings_map_desc"),
+            tr("settings_app") + "\n" + tr("settings_app_desc")
+        )
+        android.app.AlertDialog.Builder(this).setTitle(tr("settings"))
+            .setItems(sections) { _, section -> showSettingsSection(section) }
+            .setNegativeButton(tr("back"), null).show()
     }
+
+    private fun showSettingsSection(section: Int) {
+        val indices: List<Int> = when (section) {
+            0 -> listOf(0,1,2,3,4)
+            1 -> listOf(5,6,13,7,8,9)
+            2 -> listOf(11,14)
+            else -> listOf(12,10)
+        }
+        val labelFor: (Int) -> String = { index ->
+            when (index) {
+                0 -> tr("warn_short")
+                1 -> tr("warn_normal")
+                2 -> tr("warn_early")
+                3 -> tr("repeat")
+                4 -> tr("all_notes")
+                5 -> tr("copilot")
+                6 -> tr("test_voice")
+                7 -> tr("android_voice")
+                8 -> tr("pitch")
+                9 -> tr("engine")
+                10 -> tr("licenses")
+                11 -> tr("vehicle")
+                12 -> tr("change")
+                13 -> tr("context_menu")
+                14 -> tr("vehicle_size")
+                else -> ""
+            }
+        }
+        val names = indices.map { i ->
+            val selected = if (i == warnFactor) "✓  " else ""
+            selected + labelFor(i)
+        }.toTypedArray()
+        val titles = arrayOf(tr("settings_nav"),tr("settings_voice"),tr("settings_map"),tr("settings_app"))
+        android.app.AlertDialog.Builder(this).setTitle(titles.getOrElse(section) { tr("settings") })
+            .setItems(names) { _, which -> handleSettingsOption(indices[which]) }
+            .setNegativeButton(tr("back")) { _, _ -> showSettings() }.show()
+    }
+
+    private fun handleSettingsOption(index: Int) {
+        when (index) {
+            0,1,2 -> {
+                warnFactor = index
+                prefs.edit().putInt("anticipation", index).apply()
+                status("Anticipación: " + arrayOf(tr("warn_short"),tr("warn_normal"),tr("warn_early"))[index],false)
+            }
+            3 -> plan?.notes?.getOrNull(lastSpoken)?.let {
+                speakRallyNote(it,plan?.notes?.getOrNull(lastSpoken+1),50.0)
+            }
+            4 -> {
+                val text = plan?.notes?.mapIndexed { j,n ->
+                    "${j+1}. ${n.metresFromStart.toInt()} m: ${PaceNotes.phrase(n)}"
+                }?.joinToString("\n") ?: "Todavía no hay un recorrido"
+                android.app.AlertDialog.Builder(this).setTitle(tr("all_notes"))
+                    .setMessage(text.take(14000)).setPositiveButton(tr("back"),null).show()
+            }
+            5 -> selectRallyVoiceMode()
+            6 -> previewRallyVoice()
+            7 -> chooseVoice()
+            8 -> adjustVoice()
+            9 -> openTtsSettings()
+            10 -> android.app.AlertDialog.Builder(this).setTitle(tr("licenses"))
+                .setMessage("CarlFM · rhasspy/piper-voices · MIT. Los audios OGG se generaron con datos declarados de dominio público. Ver docs/VOICE_LICENSES.md en GitHub.")
+                .setPositiveButton(tr("back"),null).show()
+            11 -> selectVehicleMarker()
+            12 -> showWelcomeSetup(firstRun = false)
+            13 -> selectContextualMode()
+            14 -> selectVehicleMarkerSize()
+        }
+    }
+
     override fun onStart() { super.onStart();mapView.onStart() }
     override fun onResume() {
         super.onResume(); mapView.onResume()
