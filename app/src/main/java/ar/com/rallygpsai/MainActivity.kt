@@ -511,8 +511,8 @@ class MainActivity : Activity(), LocationListener {
         val noteWords = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_VERTICAL
-            addView(noteBadge, LinearLayout.LayoutParams(-1, -2))
-            addView(noteTitle, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(3) })
+            // The heading is redundant (NOTA DE RALLY): leave only the turn direction.
+            addView(noteTitle, LinearLayout.LayoutParams(-1, -2))
             addView(noteDetail, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4) })
         }
         // Large next-bend distance follows familiar navigation hierarchy: number first,
@@ -630,6 +630,9 @@ class MainActivity : Activity(), LocationListener {
     private fun status(message: String, error: Boolean) {
         banner.text = message
         banner.setTextColor(Color.parseColor(if (error) "#FF907B" else muted))
+        // Do not reserve a permanent status line when a route is already displayed.
+        banner.visibility = if (error || (plan == null && !navigating && !demo))
+            View.VISIBLE else View.GONE
     }
     private fun execute(label: String, request: () -> Any?, success: (Any?) -> Unit) {
         status("$label…", false)
@@ -1074,6 +1077,20 @@ class MainActivity : Activity(), LocationListener {
                 textOffset(arrayOf(0f,-1.55f))))
         }
         drawWaypoints()
+        // Route and bend layers may have been added after the GPS marker.
+        // Recreate the marker layers last, so the vehicle is always above coloured roads.
+        if (s.getSource("rally_me") != null) {
+            for (id in listOf("rally_car_layer", "rally_me_layer", "rally_car_halo")) {
+                if (s.getLayer(id) != null) s.removeLayer(id)
+            }
+            s.addLayer(CircleLayer("rally_car_halo", "rally_me").withProperties(
+                circleColor("#0B2134"), circleRadius(24f), circleOpacity(0.72f),
+                circleStrokeColor("#79E6FF"), circleStrokeWidth(2.4f)))
+            s.addLayer(CircleLayer("rally_me_layer", "rally_me").withProperties(
+                circleColor(sky), circleRadius(11f),
+                circleStrokeColor("#FFFFFF"), circleStrokeWidth(3f)))
+            updateVehicleLayers()
+        }
     }
     private fun drawWaypoints() {
         val style = map?.style ?: return
@@ -1125,9 +1142,12 @@ class MainActivity : Activity(), LocationListener {
         val source = style.getSourceAs<GeoJsonSource>("rally_me")
         if (source == null) {
             style.addSource(GeoJsonSource("rally_me", point))
-            // Keep dot source in all cases: it is a valid alternative and a robust fallback.
+            style.addLayer(CircleLayer("rally_car_halo", "rally_me").withProperties(
+                circleColor("#0B2134"), circleRadius(24f), circleOpacity(0.72f),
+                circleStrokeColor("#79E6FF"), circleStrokeWidth(2.4f)))
+            // Classic GPS dot remains available if selected or if bitmap decoding fails.
             style.addLayer(CircleLayer("rally_me_layer", "rally_me").withProperties(
-                circleColor(sky), circleRadius(9f),
+                circleColor(sky), circleRadius(11f),
                 circleStrokeColor("#FFFFFF"), circleStrokeWidth(3f)))
         } else {
             source.setGeoJson(point)
@@ -1165,7 +1185,7 @@ class MainActivity : Activity(), LocationListener {
                 if (vehicleImageKeys.add(imageKey)) {
                     style.addImage(imageKey, bitmap)
                 }
-                val size = if (selected == RallyVehicles.DEFAULT) 0.86f else 0.63f
+                val size = if (selected == RallyVehicles.DEFAULT) 1.32f else 0.96f
                 val bearing = (if (demo) plan?.points?.getOrNull(positionIndex) else gps)
                     ?.let { carBearing(it) } ?: 0f
                 val layer = style.getLayerAs<SymbolLayer>("rally_car_layer")
@@ -1182,6 +1202,8 @@ class MainActivity : Activity(), LocationListener {
                 }
             } else activeCar = false
         }
+        style.getLayer("rally_car_halo")?.setProperties(
+            visibility(if (activeCar) Property.VISIBLE else Property.NONE))
         style.getLayer("rally_car_layer")?.setProperties(
             visibility(if (activeCar) Property.VISIBLE else Property.NONE))
         style.getLayer("rally_me_layer")?.setProperties(
