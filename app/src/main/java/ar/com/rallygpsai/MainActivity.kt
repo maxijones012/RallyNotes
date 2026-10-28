@@ -1214,7 +1214,12 @@ class MainActivity : Activity(), LocationListener {
                 if (vehicleImageKeys.add(imageKey)) {
                     style.addImage(imageKey, bitmap)
                 }
-                val size = if (selected == RallyVehicles.DEFAULT) 1.32f else 0.96f
+                val setting = prefs.getString("vehicle_marker_size", "large")
+                val size = when (setting) {
+                    "normal" -> if (selected == RallyVehicles.DEFAULT) 1.9f else 1.55f
+                    "xl" -> if (selected == RallyVehicles.DEFAULT) 3.7f else 3.0f
+                    else -> if (selected == RallyVehicles.DEFAULT) 2.85f else 2.35f
+                }
                 val bearing = (if (demo) plan?.points?.getOrNull(positionIndex) else gps)
                     ?.let { carBearing(it) } ?: 0f
                 val layer = style.getLayerAs<SymbolLayer>("rally_car_layer")
@@ -1231,12 +1236,31 @@ class MainActivity : Activity(), LocationListener {
                 }
             } else activeCar = false
         }
-        style.getLayer("rally_car_halo")?.setProperties(
+        val radius = when (prefs.getString("vehicle_marker_size", "large")) {
+            "normal" -> 19f
+            "xl" -> 39f
+            else -> 29f
+        }
+        style.getLayerAs<CircleLayer>("rally_car_halo")?.setProperties(
+            circleRadius(radius),
             visibility(if (activeCar) Property.VISIBLE else Property.NONE))
         style.getLayer("rally_car_layer")?.setProperties(
             visibility(if (activeCar) Property.VISIBLE else Property.NONE))
         style.getLayer("rally_me_layer")?.setProperties(
             visibility(if (activeCar) Property.NONE else Property.VISIBLE))
+    }
+
+    private fun selectVehicleMarkerSize() {
+        val sizes = listOf("normal", "large", "xl")
+        val labels = arrayOf(tr("size_normal"), tr("size_large"), tr("size_xl"))
+        val current = prefs.getString("vehicle_marker_size", "large")
+        android.app.AlertDialog.Builder(this).setTitle(tr("vehicle_size"))
+            .setSingleChoiceItems(labels, sizes.indexOf(current).coerceAtLeast(1)) { dialog, which ->
+                prefs.edit().putString("vehicle_marker_size", sizes[which]).apply()
+                updateVehicleLayers()
+                dialog.dismiss()
+            }
+            .setNegativeButton(tr("back"), null).show()
     }
 
     /** Real, scrollable, offline image gallery; selection persists across app restarts. */
