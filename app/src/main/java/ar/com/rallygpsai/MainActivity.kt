@@ -785,10 +785,16 @@ class MainActivity : Activity(), LocationListener {
     }
     private fun startDemo() {
         if (demo) { demo=false; contextualCopilot.reset(); nextButton.text="DEMO"; action.text=tr("go"); showDrivingControls(true); return }
-        if (plan == null) {
-            val center = gps ?: GeoPoint(-43.249, -65.309)
-            setPlan(PaceNotes.synthetic(center), false)
-            status("RUTA SIMULADA: no corresponde a calles reales", false)
+        // Never draw a fabricated road through real city blocks. A DEMO may simulate
+        // movement on an already calculated road route or a user-imported GPX only.
+        if (!DemoRoutePolicy.canStart(plan)) {
+            android.app.AlertDialog.Builder(this)
+                .setTitle("DEMO · PRIMERO ELEGÍ UNA RUTA")
+                .setMessage("Para simular necesitás un recorrido real calculado por el navegador o un GPX que hayas importado. Elegí un destino y tocá TRAZAR RUTA. DEMO no inventa calles ni cruza manzanas.")
+                .setPositiveButton("ENTENDIDO", null)
+                .setNeutralButton("IMPORTAR GPX") { _, _ -> importGpx() }
+                .show()
+            return
         }
         navigationSession++
         reroutePolicy.reset()
@@ -834,7 +840,7 @@ class MainActivity : Activity(), LocationListener {
         val remaining = (route.totalMetres-result.fix.metres).coerceAtLeast(0.0)
         lastRemainingMetres = remaining
         currentNote = result.noteIndex.coerceAtLeast(0)
-        info.text = "${(speed*3.6).toInt().coerceAtLeast(0)} km/h"
+        info.text = (if (demo) "DEMO · " else "") + "${(speed*3.6).toInt().coerceAtLeast(0)} km/h"
         tripDistance.text = RallyDistanceFormatter.remaining(remaining) + " " + tr("remaining")
         val next = route.notes.getOrNull(result.noteIndex)
         if (next == null) {
