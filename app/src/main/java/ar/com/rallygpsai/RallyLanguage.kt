@@ -165,7 +165,7 @@ object RallyLanguage {
     }
     fun distanceCall(code: String, distance: Double): String {
         if (distance <= 22.0) return text(code, "now")
-        val m = ((distance / 10.0).roundToInt() * 10).coerceIn(20, 400)
+        val m = RallySpokenDistance.roundMetres(distance).coerceIn(20, 1000)
         return when {
             normalized(code).startsWith("en") -> "In " + m + " meters"
             normalized(code).startsWith("pt") -> "Em " + m + " metros"
