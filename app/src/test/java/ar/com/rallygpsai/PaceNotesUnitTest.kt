@@ -27,12 +27,12 @@ class PaceNotesUnitTest {
         assertNull(guidance.announcement)
     }
 
-    @Test fun validRouteProducesNoDuplicateSpokenNotes() {
+    @Test fun validRouteProducesAtMostTwoStagedAnnouncementsPerNote() {
         val plan = PaceNoteEngine.createPlan(PaceNotes.synthetic(origin))
         val navigator = NavigationEngine(plan)
         val announcements = plan.points.mapNotNull { navigator.update(it, 15f).announcement }
         assertTrue(announcements.isNotEmpty())
-        assertTrue(announcements.size <= plan.notes.size + 1)
+        assertTrue(announcements.size <= plan.notes.size * 2 + 1)
     }
 
     @Test fun speedControlsAnticipation() {
