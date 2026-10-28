@@ -741,9 +741,6 @@ class MainActivity : Activity(), LocationListener {
             status("Ruta calculada. Si te desviás, intentará recalcular con internet.", false)
         }
     }
-    private fun setPlan(points: List<GeoPoint>, save: Boolean) =
-        setPreparedPlan(PaceNoteEngine.createPlan(points), save)
-
     private fun setPreparedPlan(parsed: RoutePlan, save: Boolean) {
         navigationSession++
         reroutePolicy.reset()
