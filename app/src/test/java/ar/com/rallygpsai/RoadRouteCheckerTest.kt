@@ -15,7 +15,7 @@ class RoadRouteCheckerTest {
         assertTrue(m.totalMetres>500)
     }
     @Test fun inaccurateDestinationRequiresReview() {
-        val offset=GeoPoint(-43.2485, -65.305)
+        val offset=GeoPoint(-43.250, -65.305) // ~222 m from the snapped endpoint
         val m=RoadRouteChecker.inspect(listOf(a,offset),route,listOf(a,c),610.0)
         assertFalse(m.rejected)
         assertTrue(m.reviewRequired)
