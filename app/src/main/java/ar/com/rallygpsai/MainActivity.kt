@@ -1799,8 +1799,13 @@ class MainActivity : Activity(), LocationListener {
 
     private fun drawRecceFocus() {
         val style = map?.style ?: return
-        val route = plan ?: return
-        val note = recceNoteIndex?.let { route.notes.getOrNull(it) } ?: return
+        val route = plan
+        val note = recceNoteIndex?.let { route?.notes?.getOrNull(it) }
+        if (route == null || note == null) {
+            style.getLayer("rally_recce_layer")?.setProperties(visibility(Property.NONE))
+            return
+        }
+        style.getLayer("rally_recce_layer")?.setProperties(visibility(Property.VISIBLE))
         val i = route.metresAtPoint.binarySearch(note.metresFromStart).let {
             if(it<0) -it-1 else it
         }.coerceIn(0,route.points.lastIndex)
