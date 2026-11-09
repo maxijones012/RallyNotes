@@ -18,6 +18,7 @@ data class PaceNote(
     val tightensTo: Int? = null,
     val opensTo: Int? = null,
     val confidence: Double = 0.65,
+    val manuallyLong: Boolean? = null,
 ) {
     enum class Side { LEFT, RIGHT }
     val title: String get() = "${if (side == Side.LEFT) "Izquierda" else "Derecha"} $grade"
@@ -60,6 +61,9 @@ object PaceNoteEngine {
         val rawDistances = DoubleArray(raw.size)
         for (j in 1 until raw.size) rawDistances[j] = rawDistances[j-1] + raw[j-1].distance(raw[j])
         val total = rawDistances.last()
+        // Do not allocate hundreds of thousands of samples on long road journeys.
+        // Local bends retain the normal five-metre resolution.
+        val sampleStep = max(SAMPLE_M, total / 35_000.0)
         val sampled = mutableListOf<XY>()
         var segment = 1
         var at = 0.0
@@ -69,7 +73,7 @@ object PaceNoteEngine {
             val t = ((at-rawDistances[segment-1]) / den).coerceIn(0.0,1.0)
             val a = raw[segment-1]; val b = raw[segment]
             sampled.add(XY(a.x+(b.x-a.x)*t, a.y+(b.y-a.y)*t))
-            at += SAMPLE_M
+            at += sampleStep
         }
         sampled.add(raw.last())
         val smooth = sampled.mapIndexed { i, p ->

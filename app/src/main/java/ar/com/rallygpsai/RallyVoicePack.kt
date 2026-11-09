@@ -30,8 +30,8 @@ object RallyVoicePack {
         } else if (note.opensTo != null && note.opensTo > note.grade) {
             add("abre_a_${note.opensTo.coerceIn(1, 6)}")
         }
-        if (note.endMetres - note.metresFromStart >= 95.0 ||
-            (note.cumulativeTurnDegrees >= 95 && note.grade >= 3)) add("larga")
+        if (note.manuallyLong ?: (note.endMetres - note.metresFromStart >= 95.0 ||
+            (note.cumulativeTurnDegrees >= 95 && note.grade >= 3))) add("larga")
         if (next != null && next.metresFromStart - note.endMetres in 0.0..85.0) {
             add("enlaza")
             add("${if (next.side == PaceNote.Side.LEFT) "izquierda" else "derecha"}_${next.grade.coerceIn(1, 6)}")

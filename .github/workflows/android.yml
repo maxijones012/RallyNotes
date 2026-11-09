@@ -24,17 +24,9 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
-      - name: Verificar codificador de audio
-        run: |
-          if command -v ffmpeg >/dev/null 2>&1; then
-            ffmpeg -version | head -1
-          else
-            timeout 90s sudo apt-get update -qq
-            timeout 90s sudo apt-get install -y -qq ffmpeg
-          fi
       - name: Preparar audio offline redistribuible CarlFM
         run: |
-          python3 -m pip install --disable-pip-version-check 'piper-tts==1.8.0'
+          python3 -m pip install --disable-pip-version-check 'piper-tts==1.8.0' 'imageio-ffmpeg==0.6.0'
           python3 scripts/generate_rally_voice.py
       - name: Pruebas automatizadas Android (JVM)
         run: gradle :app:testDebugUnitTest --no-daemon --stacktrace
@@ -55,26 +47,27 @@ jobs:
       - name: Publicar APK descargable
         uses: actions/upload-artifact@v4
         with:
-          name: Rally-GPS-AI-v0.2.9-CarlFM-debug
+          name: Rally-GPS-AI-v0.3.0-CarlFM-debug
           path: app/build/outputs/apk/debug/app-debug.apk
           retention-days: 14
 
-      - name: Publicar Release v0.2.9 con APK
+      - name: Publicar Release v0.3.0 con APK
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          VERSION=v0.2.9
+          VERSION=v0.3.0
           cp app/build/outputs/apk/debug/app-debug.apk "Rally_GPS_AI_${VERSION}.apk"
           cat > release_notes.txt <<'EOF'
-          Rally GPS AI 0.2.7 (versión de prueba para Android)
+          Rally GPS AI 0.3.0 (versión de prueba para Android)
 
-          - Interfaz más limpia: se quitó el encabezado grande.
-          - Botones de 3D y VOZ abajo a la derecha.
-          - Ajustes organizados por Navegación, Voz, Mapa e Idioma.
-          - Vehículos GPS más grandes con tamaños Normal, Grande y Extra grande.
-          - Selección de 24 marcadores, notas de rally y copiloto contextual.
-          - Distancias habladas hasta 1.000 metros y audios CarlFM sin conexión.
+          - RECONOCIMIENTO: revisar curvas en lista y sobre el mapa, escuchar notas y avanzar entre ellas.
+          - Editor de notas: ajustar izquierda/derecha, grado 1–6, punto de aviso, larga, abre y cierra.
+          - Correcciones guardadas localmente por ruta; no modifican ni crean calles.
+          - Ruteo OSRM: verificar geometría, posiciones ajustadas a calles y distancias.
+          - Las rutas dudosas requieren confirmación; un recálculo inválido conserva el trazado anterior.
+          - Mantiene notas encadenadas, modo compacto, 3-2-1-GO, historial y estadísticas GPS reales.
+          - Mantiene Subaru, selección de vehículos, idiomas, voces CarlFM y copiloto contextual.
 
           APK de prueba (debug): podés instalarla manualmente en Android. Algunas actualizaciones pueden exigir desinstalar la versión anterior si la firma es diferente. Respaldá tus GPX primero.
           Las notas derivadas del mapa son aproximadas y no sustituyen la señalización ni la conducción segura.

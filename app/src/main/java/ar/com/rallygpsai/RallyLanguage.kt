@@ -50,7 +50,12 @@ object RallyLanguage {
         "settings_map" to "MAPA Y VEHÍCULO", "settings_map_desc" to "Seleccionar auto y cambiar tamaño",
         "settings_app" to "IDIOMA E INFORMACIÓN", "settings_app_desc" to "Idioma y licencias",
         "vehicle_size" to "Tamaño del vehículo GPS", "size_normal" to "Normal",
-        "size_large" to "Grande", "size_xl" to "Extra grande", "back" to "ATRÁS", "queue_next" to "SIGUE", "queue_after" to "DESPUÉS", "history" to "HISTORIAL", "note_view" to "Tamaño del panel de notas", "note_large" to "Notas grandes", "note_compact" to "Modo compacto · más mapa"
+        "size_large" to "Grande", "size_xl" to "Extra grande", "back" to "ATRÁS", "queue_next" to "SIGUE", "queue_after" to "DESPUÉS", "history" to "HISTORIAL", "note_view" to "Tamaño del panel de notas", "note_large" to "Notas grandes", "note_compact" to "Modo compacto · más mapa",
+        "recce" to "RECONOCIMIENTO", "recce_short" to "RECON.", "edit_note" to "EDITAR NOTA",
+        "previous" to "ANTERIOR", "following" to "SIGUIENTE", "listen" to "ESCUCHAR",
+        "save" to "GUARDAR", "restore" to "RESTABLECER", "position" to "POSICIÓN",
+        "grade" to "DIFICULTAD", "modifiers" to "MODIFICADORES", "check_route" to "REVISAR RUTA",
+        "route_warning" to "Ruta aproximada: revisá el trazado en el mapa antes de salir"
     )
     private val en = mapOf(
         "welcome" to "Welcome to Rally GPS AI!", "select" to "Choose your navigation and co-driver language.",
@@ -84,7 +89,13 @@ object RallyLanguage {
         "settings_map" to "MAP & VEHICLE", "settings_map_desc" to "Vehicle selection and size",
         "settings_app" to "LANGUAGE & INFO", "settings_app_desc" to "Language and licenses",
         "vehicle_size" to "GPS vehicle size", "size_normal" to "Normal",
-        "size_large" to "Large", "size_xl" to "Extra large", "back" to "BACK", "queue_next" to "NEXT", "queue_after" to "THEN", "history" to "HISTORY", "note_view" to "Pace-note display size", "note_large" to "Large pace notes", "note_compact" to "Compact mode · more map"
+        "size_large" to "Large", "size_xl" to "Extra large", "back" to "BACK", "queue_next" to "NEXT", "queue_after" to "THEN", "history" to "HISTORY", "note_view" to "Pace-note display size", "note_large" to "Large pace notes", "note_compact" to "Compact mode · more map",
+        "recce" to "RECONNAISSANCE", "recce_short" to "RECCE",
+        "edit_note" to "EDIT PACE NOTE", "previous" to "PREVIOUS", "following" to "NEXT",
+        "listen" to "LISTEN", "save" to "SAVE", "restore" to "RESET",
+        "position" to "POSITION", "grade" to "GRADE", "modifiers" to "MODIFIERS",
+        "check_route" to "REVIEW ROUTE",
+        "route_warning" to "Approximate route: check the plotted road before starting"
     )
     private val pt = mapOf(
         "welcome" to "Bem-vindo ao Rally GPS AI!", "select" to "Escolha o idioma da navegação e do copiloto.",
@@ -118,7 +129,13 @@ object RallyLanguage {
         "settings_map" to "MAPA E VEÍCULO", "settings_map_desc" to "Escolher veículo e tamanho",
         "settings_app" to "IDIOMA E INFORMAÇÕES", "settings_app_desc" to "Idioma e licenças",
         "vehicle_size" to "Tamanho do veículo no GPS", "size_normal" to "Normal",
-        "size_large" to "Grande", "size_xl" to "Extra grande", "back" to "VOLTAR", "queue_next" to "SEGUE", "queue_after" to "DEPOIS", "history" to "HISTÓRICO", "note_view" to "Tamanho do painel de notas", "note_large" to "Notas grandes", "note_compact" to "Modo compacto · mais mapa"
+        "size_large" to "Grande", "size_xl" to "Extra grande", "back" to "VOLTAR", "queue_next" to "SEGUE", "queue_after" to "DEPOIS", "history" to "HISTÓRICO", "note_view" to "Tamanho do painel de notas", "note_large" to "Notas grandes", "note_compact" to "Modo compacto · mais mapa",
+        "recce" to "RECONHECIMENTO", "recce_short" to "RECON.",
+        "edit_note" to "EDITAR NOTA", "previous" to "ANTERIOR", "following" to "PRÓXIMA",
+        "listen" to "OUVIR", "save" to "SALVAR", "restore" to "RESTAURAR",
+        "position" to "POSIÇÃO", "grade" to "GRAU", "modifiers" to "MODIFICADORES",
+        "check_route" to "REVISAR ROTA",
+        "route_warning" to "Rota aproximada: confira o traçado no mapa antes de sair"
     )
     fun text(code: String, key: String): String = when {
         normalized(code).startsWith("en") -> en[key]
@@ -174,7 +191,7 @@ object RallyLanguage {
         pieces += side + " " + note.grade
         note.tightensTo?.takeIf { it < note.grade }?.let { pieces += text(l, "close") + " " + it }
         note.opensTo?.takeIf { it > note.grade }?.let { pieces += text(l, "open") + " " + it }
-        if (note.endMetres - note.metresFromStart >= 95.0 || (note.cumulativeTurnDegrees >= 95 && note.grade >= 3)) pieces += text(l, "long")
+        if (note.manuallyLong ?: (note.endMetres - note.metresFromStart >= 95.0 || (note.cumulativeTurnDegrees >= 95 && note.grade >= 3))) pieces += text(l, "long")
         if (next != null && next.metresFromStart - note.endMetres in 0.0..85.0) {
             val nside = if (next.side == PaceNote.Side.LEFT) text(l, "left") else text(l, "right")
             pieces += text(l, "linked") + " " + nside + " " + next.grade

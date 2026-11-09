@@ -9,7 +9,7 @@ object PaceNotes {
         val extra = buildString {
             if (note.tightensTo != null && note.tightensTo < note.grade) append(", se cierra a ${note.tightensTo}")
             else if (note.opensTo != null && note.opensTo > note.grade) append(", abre a ${note.opensTo}")
-            if (note.endMetres - note.metresFromStart >= 95.0 || (note.cumulativeTurnDegrees >= 95 && note.grade >= 3)) append(", larga")
+            if (note.manuallyLong ?: (note.endMetres - note.metresFromStart >= 95.0 || (note.cumulativeTurnDegrees >= 95 && note.grade >= 3))) append(", larga")
             if (next != null && next.metresFromStart - note.endMetres in 0.0..85.0) {
                 append(", enlaza ${if (next.side == PaceNote.Side.LEFT) "izquierda" else "derecha"} ${next.grade}")
             }
