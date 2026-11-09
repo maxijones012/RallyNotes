@@ -18,6 +18,7 @@ data class PaceNote(
     val tightensTo: Int? = null,
     val opensTo: Int? = null,
     val confidence: Double = 0.65,
+    val manuallyLong: Boolean? = null,
 ) {
     enum class Side { LEFT, RIGHT }
     val title: String get() = "${if (side == Side.LEFT) "Izquierda" else "Derecha"} $grade"
