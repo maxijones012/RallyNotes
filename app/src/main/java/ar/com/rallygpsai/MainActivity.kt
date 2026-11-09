@@ -51,6 +51,10 @@ class MainActivity : Activity(), LocationListener {
     private lateinit var mapView: MapView
     private var map: MapLibreMap? = null
     private var plan: RoutePlan? = null
+    private var automaticNotePlan: RoutePlan? = null
+    private val noteEdits = mutableListOf<NoteCorrection>()
+    private val noteEditsStore by lazy { NoteEditStore(this) }
+    private var recceNoteIndex: Int? = null
     private var gps: GeoPoint? = null
     private var lastLocation: Location? = null
     private var target: GeoPoint? = null
@@ -120,6 +124,7 @@ class MainActivity : Activity(), LocationListener {
     private lateinit var pointsButton: TextView
     private lateinit var settingsButton: TextView
     private lateinit var historyButton: TextView
+    private lateinit var recceButton: TextView
     private lateinit var nextCurveCaption: TextView
     private lateinit var destinationIndicator: TextView
     private lateinit var toolsRow: LinearLayout
@@ -340,6 +345,8 @@ class MainActivity : Activity(), LocationListener {
         pointsButton.text = tr("points")
         settingsButton.text = tr("settings")
         historyButton.contentDescription = tr("history")
+        recceButton.contentDescription = tr("recce")
+        recceButton.text = tr("recce_short")
         nextCurveCaption.text = tr("next")
         action.text = when {
             navigating || demo -> tr("finish")
@@ -608,17 +615,22 @@ class MainActivity : Activity(), LocationListener {
         }
         bottom.addView(actionRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(9) })
 
-        toolsRow = row(5) {
-            pointsButton = button(tr("points")).apply { textSize=11f; setOnClickListener { showPointOptions() } }
+        toolsRow = row(4) {
+            pointsButton = button(tr("points")).apply { textSize=10f; setOnClickListener { showPointOptions() } }
             add(pointsButton, 0, dp(46),1f)
+            recceButton = button(tr("recce_short")).apply {
+                textSize=10f; contentDescription=tr("recce")
+                setOnClickListener { showRecce() }
+            }
+            add(recceButton, 0, dp(46),1f)
             historyButton = button("HIST.").apply {
-                textSize=11f; contentDescription=tr("history")
+                textSize=10f; contentDescription=tr("history")
                 setOnClickListener { showTripHistory() }
             }
             add(historyButton, 0, dp(46),1f)
-            add(button("GPX ↓").apply { textSize=11f;setOnClickListener { importGpx() } }, 0,dp(46),1f)
-            add(button("GPX ↑").apply { textSize=11f;setOnClickListener { exportGpx() } }, 0,dp(46),1f)
-            settingsButton = button(tr("settings")).apply { textSize=11f;setOnClickListener { showSettings() } }
+            add(button("GPX ↓").apply { textSize=10f;setOnClickListener { importGpx() } }, 0,dp(46),1f)
+            add(button("GPX ↑").apply { textSize=10f;setOnClickListener { exportGpx() } }, 0,dp(46),1f)
+            settingsButton = button(tr("settings")).apply { textSize=10f;setOnClickListener { showSettings() } }
             add(settingsButton,0,dp(46),1f)
         }
         bottom.addView(toolsRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
@@ -812,7 +824,29 @@ class MainActivity : Activity(), LocationListener {
             status("Ruta calculada. Si te desviás, intentará recalcular con internet.", false)
         }
     }
-    private fun setPreparedPlan(parsed: RoutePlan, save: Boolean) {
+    /** Apply only corrections stored for exactly this route's geometry. */
+    private fun correctedRoute(source: RoutePlan): RoutePlan {
+        automaticNotePlan = source
+        noteEdits.clear()
+        noteEdits.addAll(noteEditsStore.load(source))
+        recceNoteIndex = null
+        return EditablePacenotes.apply(source, noteEdits)
+    }
+
+    private fun refreshManualNotes() {
+        val base = automaticNotePlan ?: return
+        val updated = EditablePacenotes.apply(base, noteEdits)
+        plan = updated
+        navigator = NavigationEngine(updated) { warnFactor }
+        currentNote = 0
+        lastSpoken = -1
+        drawPlan()
+        val count = noteEdits.size
+        status("Notas actualizadas · $count correcciones guardadas", false)
+    }
+
+    private fun setPreparedPlan(sourcePlan: RoutePlan, save: Boolean) {
+        val parsed = correctedRoute(sourcePlan)
         navigationSession++
         reroutePolicy.reset()
         routeDestination = null
@@ -1034,8 +1068,9 @@ class MainActivity : Activity(), LocationListener {
                 val updated = PaceNoteEngine.createPlan(RouteServices.route(current, stopsAhead, destination))
                 runOnUiThread {
                     if (session == navigationSession && navigating && !demo && routeDestination == destination && plan === oldPlan) {
-                        plan = updated
-                        navigator = NavigationEngine(updated) { warnFactor }
+                        val edited = correctedRoute(updated)
+                        plan = edited
+                        navigator = NavigationEngine(edited) { warnFactor }
                         contextualCopilot.reset(); lastPriorityNoteAtMs = -1L
                         drivingCamera.reset()
                         lastSpoken = -1
