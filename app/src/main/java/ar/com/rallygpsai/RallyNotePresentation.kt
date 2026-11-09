@@ -45,8 +45,8 @@ object RallyNotePresentation {
         val distanceDisplay = RallyDistanceFormatter.format(distance)
         val details = mutableListOf<String>()
         if (note.cumulativeTurnDegrees >= 145 && note.grade <= 2) details += "HORQUILLA"
-        if (note.endMetres - note.metresFromStart >= 95.0 ||
-            (note.cumulativeTurnDegrees >= 95 && note.grade >= 3)) details += "LARGA"
+        if (note.manuallyLong ?: (note.endMetres - note.metresFromStart >= 95.0 ||
+            (note.cumulativeTurnDegrees >= 95 && note.grade >= 3))) details += "LARGA"
         note.tightensTo?.let { if (it < note.grade) details += "CIERRA A $it" }
         note.opensTo?.let { if (it > note.grade) details += "ABRE A $it" }
         val chaining = following?.takeIf { it.metresFromStart - note.endMetres in 0.0..85.0 }

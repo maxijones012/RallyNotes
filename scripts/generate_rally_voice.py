@@ -92,8 +92,14 @@ def download(file_name: str, expected_sha: str | None = None) -> Path:
 def main() -> None:
     from piper import PiperVoice
     RAW.mkdir(parents=True, exist_ok=True)
-    if not shutil.which('ffmpeg'):
-        raise RuntimeError('Se requiere ffmpeg para comprimir clips')
+    ffmpeg_binary = shutil.which('ffmpeg')
+    if not ffmpeg_binary:
+        # Prebuilt portable ffmpeg from a pinned wheel; avoids apt-get hangs in CI.
+        try:
+            import imageio_ffmpeg
+            ffmpeg_binary = imageio_ffmpeg.get_ffmpeg_exe()
+        except ImportError as exc:
+            raise RuntimeError('Se requiere ffmpeg o imageio-ffmpeg para comprimir clips') from exc
     model = download(MODEL_NAME, EXPECTED_SHA256)
     download(MODEL_NAME + '.json')
     voice = PiperVoice.load(str(model))
@@ -108,7 +114,7 @@ def main() -> None:
                 ogg = RAW / f'rally_carlfm_{variant}_{token}.ogg'
                 audio_filter = ('highpass=f=180,lowpass=f=3700,acompressor=threshold=-23dB:ratio=3:'
                                 'attack=8:release=80,atempo=1.06,volume=1.25') if variant == 'radio' else 'volume=1.0'
-                subprocess.run(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-y',
+                subprocess.run([ffmpeg_binary, '-hide_banner', '-loglevel', 'error', '-y',
                                 '-i', str(wav_path), '-af', audio_filter, '-c:a', 'libvorbis',
                                 '-q:a', '2', str(ogg)], check=True)
                 if ogg.stat().st_size < 250:

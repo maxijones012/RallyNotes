@@ -133,7 +133,10 @@ object RouteServices {
         } else 0 }.thenBy { it.approximate }.thenBy { it.distanceKm ?: 0.0 })
     }
 
-    fun route(start: GeoPoint, via: List<GeoPoint>, end: GeoPoint): List<GeoPoint> {
+    fun route(start: GeoPoint, via: List<GeoPoint>, end: GeoPoint): List<GeoPoint> =
+        routeVerified(start,via,end).points
+
+    fun routeVerified(start: GeoPoint, via: List<GeoPoint>, end: GeoPoint): CheckedRoadRoute {
         require(via.size <= 4) { "Demasiadas paradas intermedias" }
         // Non-commercial demo server. Calls happen only via user interaction.
         val waypointsString = (listOf(start) + via + end).joinToString(";") { "${it.longitude},${it.latitude}" }
@@ -151,7 +154,18 @@ object RouteServices {
             out.add(GeoPoint(item.getDouble(1), item.getDouble(0)))
         }
         check(out.size >= 2 && out.size <= 30000) { "Ruta inválida o demasiado grande" }
-        return out
+        val snapped = result.optJSONArray("waypoints")?.let { locations ->
+            (0 until locations.length()).map { i ->
+                val coordinates=locations.getJSONObject(i).getJSONArray("location")
+                GeoPoint(coordinates.getDouble(1),coordinates.getDouble(0))
+            }
+        } ?: emptyList()
+        val distance=routes.getJSONObject(0).optDouble("distance",Double.NaN)
+        val assessment=RoadRouteChecker.inspect(listOf(start)+via+end, out, snapped, distance)
+        check(!assessment.rejected) {
+            assessment.reasons.joinToString(". ").ifEmpty { "Ruta inválida o demasiado alejada de las calles" }
+        }
+        return CheckedRoadRoute(out, assessment)
     }
 }
 
