@@ -409,7 +409,9 @@ class MainActivity : Activity(), LocationListener {
         setNoteVisual(PaceNotes.color(display.grade), tr("note"))
         nextTurnDistance.visibility = View.VISIBLE
         distanceNumber.text = if (display.distanceUnit.isEmpty()) tr("now") else display.distanceValue
-        distanceNumber.textSize = if (display.distanceUnit.isEmpty()) 29f else 39f
+        distanceNumber.textSize = if (prefs.getBoolean("compact_notes", false)) {
+            if (display.distanceUnit.isEmpty()) 26f else 30f
+        } else if (display.distanceUnit.isEmpty()) 29f else 39f
         distanceUnit.text = display.distanceUnit
         primaryNoteTile.visibility = View.VISIBLE
         primaryNoteTile.show(display.grade, display.side)
@@ -653,6 +655,42 @@ class MainActivity : Activity(), LocationListener {
         bottom.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> positionFloatingControls() }
         root.post { positionFloatingControls() }
         setContentView(root)
+        applyNoteViewMode()
+    }
+
+    /** Keep the large rally board by default; compact mode frees extra map space. */
+    private fun applyNoteViewMode() {
+        if (!::primaryNoteTile.isInitialized || !::linkedNoteTile.isInitialized) return
+        val compact = prefs.getBoolean("compact_notes", false)
+        val p = primaryNoteTile.layoutParams as? LinearLayout.LayoutParams
+        p?.width = dp(if (compact) 56 else 78)
+        p?.height = dp(if (compact) 56 else 78)
+        if (p != null) primaryNoteTile.layoutParams = p
+        val n = linkedNoteTile.layoutParams as? LinearLayout.LayoutParams
+        n?.width = dp(if (compact) 49 else 66)
+        n?.height = dp(if (compact) 49 else 66)
+        if (n != null) linkedNoteTile.layoutParams = n
+        val col = linkedNoteColumn.layoutParams as? LinearLayout.LayoutParams
+        col?.width = dp(if (compact) 54 else 66)
+        if (col != null) linkedNoteColumn.layoutParams = col
+        noteTitle.textSize = if (compact) 17f else 21f
+        noteDetail.textSize = if (compact) 10f else 11.5f
+        afterNextHint.textSize = if (compact) 10f else 11f
+        distanceNumber.textSize = if (compact) 30f else 39f
+        noteCard.requestLayout()
+    }
+
+    private fun selectNoteViewMode() {
+        val names = arrayOf(tr("note_large"), tr("note_compact"))
+        android.app.AlertDialog.Builder(this).setTitle(tr("note_view"))
+            .setSingleChoiceItems(names, if (prefs.getBoolean("compact_notes",false)) 1 else 0) { dialog,index ->
+                prefs.edit().putBoolean("compact_notes",index==1).apply()
+                applyNoteViewMode()
+                plan?.notes?.getOrNull(currentNote)?.takeIf { navigating || demo }?.let { note ->
+                    updateNoteCard(note,plan?.notes?.getOrNull(currentNote+1), lastNoteDistanceM)
+                }
+                dialog.dismiss()
+            }.setNegativeButton(tr("back"), null).show()
     }
 
     private fun positionFloatingControls() {
@@ -1701,7 +1739,7 @@ class MainActivity : Activity(), LocationListener {
 
     private fun showSettingsSection(section: Int) {
         val indices: List<Int> = when (section) {
-            0 -> listOf(0,1,2,3,4)
+            0 -> listOf(0,1,2,3,4,15)
             1 -> listOf(5,6,13,7,8,9)
             2 -> listOf(11,14)
             else -> listOf(12,10)
@@ -1723,6 +1761,7 @@ class MainActivity : Activity(), LocationListener {
                 12 -> tr("change")
                 13 -> tr("context_menu")
                 14 -> tr("vehicle_size")
+                15 -> tr("note_view")
                 else -> ""
             }
         }
@@ -1765,6 +1804,7 @@ class MainActivity : Activity(), LocationListener {
             12 -> showWelcomeSetup(firstRun = false)
             13 -> selectContextualMode()
             14 -> selectVehicleMarkerSize()
+            15 -> selectNoteViewMode()
         }
     }
 
