@@ -39,6 +39,8 @@ import org.maplibre.geojson.FeatureCollection
 import org.maplibre.geojson.LineString
 import org.maplibre.geojson.Point
 import java.util.Locale
+import java.util.Date
+import java.text.SimpleDateFormat
 import kotlin.concurrent.thread
 import kotlin.math.*
 
@@ -88,6 +90,10 @@ class MainActivity : Activity(), LocationListener {
     private var firstGpsCamera = true
     private var demoPosition = 0.0
     private var demoSpeed = 55.0 / 3.6
+    private var countdownSequence = 0L
+    private var countdownDialog: android.app.AlertDialog? = null
+    private var realTripRecorder: RealTripRecorder? = null
+    private val tripHistory by lazy { TripHistoryStore(this) }
     private var speakReady = false
     private var tts: TextToSpeech? = null
     private val rallyAudio by lazy { RallyAudioPlayer(this) }
@@ -730,6 +736,7 @@ class MainActivity : Activity(), LocationListener {
     }
     private fun mainAction() {
         if (navigating || demo) {
+            finishRealTrip()
             navigationSession++
             reroutePolicy.reset()
             navigating = false; demo = false; tts?.stop(); rallyAudio.stop(); lastSpoken = -1
@@ -785,11 +792,64 @@ class MainActivity : Activity(), LocationListener {
             .target(LatLng(center.latitude, center.longitude)).zoom(12.7).tilt(0.0).build()), 600)
     }
 
+    /** Display and speak a cancellable 3, 2, 1, GO before changing navigation state. */
+    private fun startCountdown(onGo: () -> Unit) {
+        if (countdownDialog != null || navigating || demo || isFinishing || isDestroyed) return
+        val token = ++countdownSequence
+        val number = label("3", 78f, white, true).apply {
+            gravity = Gravity.CENTER
+            setPadding(dp(20), dp(8), dp(20), dp(8))
+        }
+        val note = label("PREPARATE · 3, 2, 1, GO", 14f, muted, true).apply {
+            gravity = Gravity.CENTER
+        }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(22), dp(18), dp(22), dp(18))
+            background = shape(bg, 18, "#34506C")
+            addView(note, LinearLayout.LayoutParams(-1, dp(37)))
+            addView(number, LinearLayout.LayoutParams(-1, dp(130)))
+        }
+        val dialog = android.app.AlertDialog.Builder(this)
+            .setView(content)
+            .setNegativeButton("CANCELAR") { _, _ -> countdownSequence++ }
+            .create()
+        countdownDialog = dialog
+        dialog.setCancelable(false)
+        dialog.setOnDismissListener {
+            if (countdownDialog === dialog) countdownDialog = null
+            countdownSequence++
+        }
+        dialog.show()
+        fun advance(step: Int) {
+            if (token != countdownSequence || !dialog.isShowing || isFinishing || isDestroyed) return
+            number.text = RallyStartSequence.screen(step)
+            number.setTextColor(Color.parseColor(if (step == 3) "#43D9A6" else white))
+            if (voiceOn && speakReady) say(RallyStartSequence.voice(step, appLanguage))
+            if (step == 3) {
+                ui.postDelayed({
+                    if (token != countdownSequence || !dialog.isShowing || isFinishing || isDestroyed) return@postDelayed
+                    dialog.dismiss()
+                    onGo()
+                }, 400L)
+            } else ui.postDelayed({ advance(step + 1) }, 1000L)
+        }
+        advance(0)
+    }
+
     private fun startGpsNavigation() {
+        if (plan == null) { status("Primero elegí un recorrido", true); return }
+        if (gps == null) { requestGps(); status("Esperando GPS", true); return }
+        startCountdown { beginGpsNavigation() }
+    }
+
+    private fun beginGpsNavigation() {
         if (gps == null) { requestGps(); status("Esperando GPS", true); return }
         navigationSession++
         reroutePolicy.reset()
         navigating = true; demo = false; positionIndex = 0; lastSpoken = -1; currentNote = 0
+        realTripRecorder = RealTripRecorder(System.currentTimeMillis(), SystemClock.elapsedRealtime(),
+            plan?.points.orEmpty())
         navigator?.reset(); drivingCamera.reset(); followRouteCamera = true; showDrivingControls(false)
         contextualCopilot.reset(); lastPriorityNoteAtMs = -1L
         action.text = tr("finish"); nextButton.text = "DEMO"
@@ -812,6 +872,15 @@ class MainActivity : Activity(), LocationListener {
                 .show()
             return
         }
+        if (navigating) {
+            status("Finalizá primero la navegación GPS para usar DEMO", true)
+            return
+        }
+        startCountdown { beginDemo() }
+    }
+
+    private fun beginDemo() {
+        if (!DemoRoutePolicy.canStart(plan) || isFinishing || isDestroyed) return
         navigationSession++
         reroutePolicy.reset()
         demo = true; navigating = false; demoPosition = 0.0; positionIndex=0; lastSpoken=-1
@@ -893,6 +962,7 @@ class MainActivity : Activity(), LocationListener {
             }
         }
         if (result.arrived) {
+            finishRealTrip()
             navigationSession++
             contextualCopilot.reset()
             reroutePolicy.reset()
@@ -1416,7 +1486,12 @@ class MainActivity : Activity(), LocationListener {
         val ageNs = android.os.SystemClock.elapsedRealtimeNanos() - location.elapsedRealtimeNanos
         if (ageNs > 15_000_000_000L || ageNs < -2_000_000_000L) return
         gps = GeoPoint(location.latitude,location.longitude); lastLocation=location
-        if (navigating) updateProgress(gps!!, location.speed)
+        if (navigating) {
+            realTripRecorder?.accept(gps!!, location.speed,
+                if (location.hasAccuracy()) location.accuracy else 100f,
+                SystemClock.elapsedRealtime())
+            updateProgress(gps!!, location.speed)
+        }
         if (!demo) drawPosition(gps!!)
         if (firstGpsCamera) { firstGpsCamera=false; if (!navigating) centerGps() }
         if (!navigating && !demo) status("GPS disponible · mantené pulsado el mapa para elegir destino",false)
@@ -1604,6 +1679,10 @@ class MainActivity : Activity(), LocationListener {
     override fun onLowMemory() { super.onLowMemory();mapView.onLowMemory() }
     override fun onSaveInstanceState(outState: Bundle) { super.onSaveInstanceState(outState); mapView.onSaveInstanceState(outState) }
     override fun onDestroy() {
+        countdownSequence++
+        countdownDialog?.dismiss()
+        countdownDialog = null
+        finishRealTrip()
         demo=false; navigating=false; ui.removeCallbacksAndMessages(null)
         locationManager.removeUpdates(this)
         rallyAudio.stop()
