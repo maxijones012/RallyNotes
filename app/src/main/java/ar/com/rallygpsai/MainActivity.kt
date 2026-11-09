@@ -55,6 +55,7 @@ class MainActivity : Activity(), LocationListener {
     private val noteEdits = mutableListOf<NoteCorrection>()
     private val noteEditsStore by lazy { NoteEditStore(this) }
     private var recceNoteIndex: Int? = null
+    private var recceMapSelection = false
     private var gps: GeoPoint? = null
     private var lastLocation: Location? = null
     private var target: GeoPoint? = null
@@ -186,7 +187,27 @@ class MainActivity : Activity(), LocationListener {
                 true
             }
             loaded.addOnMapClickListener { position ->
-                if (destinationTapArmed && !navigating && !demo) {
+                if (recceMapSelection && !navigating && !demo) {
+                    recceMapSelection = false
+                    val route = plan
+                    val selected = route?.notes?.indices?.minByOrNull { index ->
+                        val n = route.notes[index]
+                        val k=route.metresAtPoint.binarySearch(n.metresFromStart).let {
+                            if(it<0) -it-1 else it
+                        }.coerceIn(0,route.points.lastIndex)
+                        DrivingCamera.distance(route.points[k], GeoPoint(position.latitude,position.longitude))
+                    }
+                    if(selected!=null && route!=null) {
+                        val note=route.notes[selected]
+                        val k=route.metresAtPoint.binarySearch(note.metresFromStart).let {
+                            if(it<0) -it-1 else it
+                        }.coerceIn(0,route.points.lastIndex)
+                        if(DrivingCamera.distance(route.points[k],GeoPoint(position.latitude,position.longitude))<=90.0)
+                            showRecce(selected)
+                        else Toast.makeText(this, "No hay una curva a menos de 90 metros", Toast.LENGTH_SHORT).show()
+                    }
+                    true
+                } else if (destinationTapArmed && !navigating && !demo) {
                     chooseDestination(GeoPoint(position.latitude, position.longitude), "PUNTO DEL MAPA")
                     Toast.makeText(this, "✓ Destino elegido", Toast.LENGTH_SHORT).show()
                     true
@@ -1278,6 +1299,7 @@ class MainActivity : Activity(), LocationListener {
                 textOffset(arrayOf(0f,-1.55f))))
         }
         drawWaypoints()
+        drawRecceFocus()
         // Route and bend layers may have been added after the GPS marker.
         // Recreate the marker layers last, so the vehicle is always above coloured roads.
         if (s.getSource("rally_me") != null) {
@@ -1707,6 +1729,230 @@ class MainActivity : Activity(), LocationListener {
             status(if (viewActualTrack) "Trazado registrado cargado en el mapa"
                 else "Ruta guardada lista: podés iniciar GPS o DEMO",false)
         }
+    }
+
+
+    /** Reconnaissance is available only while parked/not navigating. */
+    private fun showRecce(index: Int? = null) {
+        if (navigating || demo) {
+            status("Finalizá la navegación para revisar y editar notas", true)
+            return
+        }
+        val route = plan
+        if (route == null || route.notes.isEmpty()) {
+            android.app.AlertDialog.Builder(this).setTitle(tr("recce"))
+                .setMessage("Primero cargá una ruta con curvas detectadas (OSRM o GPX).")
+                .setPositiveButton("ENTENDIDO",null).show()
+            return
+        }
+        if (index != null) {
+            showRecceNote(index.coerceIn(0,route.notes.lastIndex))
+            return
+        }
+        val labels = route.notes.mapIndexed { i,n ->
+            val symbol=if (n.side == PaceNote.Side.LEFT) "↰" else "↱"
+            "${i+1}. ${RallyDistanceFormatter.remaining(n.metresFromStart)} · $symbol ${n.grade}" +
+                if (noteEdits.any { it.baseIndex == i }) "  ✎" else ""
+        }.toTypedArray()
+        android.app.AlertDialog.Builder(this).setTitle(tr("recce") + " · ${route.notes.size} notas")
+            .setItems(labels) { _, i -> showRecceNote(i) }
+            .setNeutralButton("ELEGIR EN MAPA") { _, _ ->
+                recceMapSelection = true
+                status("Tocá una curva resaltada en el mapa para revisarla", false)
+                Toast.makeText(this, "Tocá una curva del recorrido", Toast.LENGTH_LONG).show()
+            }
+            .setNegativeButton(tr("back"),null).show()
+    }
+
+    private fun focusRecceNote(index: Int) {
+        val route = plan ?: return
+        val note = route.notes.getOrNull(index) ?: return
+        recceNoteIndex = index
+        drawRecceFocus()
+        val i = route.metresAtPoint.binarySearch(note.metresFromStart).let {
+            if (it < 0) -it-1 else it
+        }.coerceIn(0,route.points.lastIndex)
+        val point = route.points[i]
+        map?.animateCamera(CameraUpdateFactory.newCameraPosition(
+            CameraPosition.Builder()
+                .target(LatLng(point.latitude,point.longitude)).zoom(16.5).tilt(0.0).build()), 400)
+    }
+
+    private fun drawRecceFocus() {
+        val style = map?.style ?: return
+        val route = plan ?: return
+        val note = recceNoteIndex?.let { route.notes.getOrNull(it) } ?: return
+        val i = route.metresAtPoint.binarySearch(note.metresFromStart).let {
+            if(it<0) -it-1 else it
+        }.coerceIn(0,route.points.lastIndex)
+        val p = route.points[i]
+        val source = style.getSourceAs<GeoJsonSource>("rally_recce")
+        val point = Feature.fromGeometry(Point.fromLngLat(p.longitude,p.latitude))
+        if(source == null) {
+            style.addSource(GeoJsonSource("rally_recce",point))
+            style.addLayer(CircleLayer("rally_recce_layer","rally_recce").withProperties(
+                circleColor("#FFD348"),circleRadius(13f),
+                circleStrokeColor("#111827"),circleStrokeWidth(3f)))
+        } else source.setGeoJson(point)
+    }
+
+    private fun showRecceNote(index: Int) {
+        val route = plan ?: return
+        val n = route.notes.getOrNull(index) ?: return
+        focusRecceNote(index)
+        val follows=route.notes.getOrNull(index+1)
+        val heading = "${index+1}/${route.notes.size} · " +
+            (if(n.side==PaceNote.Side.LEFT) tr("left") else tr("right"))+" ${n.grade}"
+        val details = RallyNotePresentation.render(n,follows, n.metresFromStart)
+        val text = "Desde la salida: ${RallyDistanceFormatter.remaining(n.metresFromStart)}\n" +
+            "Nota: ${RallyLanguage.call(appLanguage,n,follows)}\n" +
+            "Características: ${details.featuresLabel}\n" +
+            if (noteEdits.any { it.baseIndex == index }) "✎ CORREGIDA MANUALMENTE" else "NOTA ESTIMADA DEL MAPA"
+        val actions = arrayOf(tr("previous"), tr("following"), tr("edit_note"), tr("listen"),
+            "VER MAPA", tr("restore"), tr("recce"))
+        android.app.AlertDialog.Builder(this).setTitle(heading)
+            .setMessage(text)
+            .setItems(actions) { _, action ->
+                when(action) {
+                    0 -> showRecce((index-1).coerceAtLeast(0))
+                    1 -> showRecce((index+1).coerceAtMost(route.notes.lastIndex))
+                    2 -> showEditNote(index)
+                    3 -> {
+                        speakRallyNote(n,follows,60.0)
+                        showRecce(index)
+                    }
+                    4 -> status("Curva ${index+1} resaltada en amarillo", false)
+                    5 -> resetEditedNote(index)
+                    6 -> showRecce()
+                }
+            }
+            .setNegativeButton(tr("back")) { _,_ -> showRecce() }
+            .show()
+    }
+
+    private fun resetEditedNote(index: Int) {
+        val base = automaticNotePlan ?: return
+        val changed = noteEdits.filterNot { it.baseIndex==index }
+        if(!noteEditsStore.save(base,changed)) {
+            Toast.makeText(this,"No se pudo guardar el cambio",Toast.LENGTH_LONG).show()
+            return
+        }
+        noteEdits.clear(); noteEdits.addAll(changed)
+        refreshManualNotes()
+        showRecce(index)
+    }
+
+    /** Edits only affect pacenotes, never map geometry, routing or vehicle position. */
+    private fun showEditNote(index: Int) {
+        if(navigating || demo) return
+        val base = automaticNotePlan ?: return
+        val original = base.notes.getOrNull(index) ?: return
+        val n = plan?.notes?.getOrNull(index) ?: original
+        val layout = LinearLayout(this).apply {
+            orientation=LinearLayout.VERTICAL
+            setPadding(dp(20),dp(10),dp(20),dp(12))
+        }
+        val direction = Spinner(this)
+        direction.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item,
+            arrayOf(tr("left"),tr("right")))
+        direction.setSelection(if(n.side==PaceNote.Side.LEFT) 0 else 1)
+        layout.addView(label("SENTIDO",12f,muted,true))
+        layout.addView(direction)
+        val gradeText = label(tr("grade")+": ${n.grade}",17f,white,true)
+        val grade = SeekBar(this).apply {
+            max=5; progress=n.grade-1
+            setOnSeekBarChangeListener(object: SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(v:SeekBar?,progress:Int,fromUser:Boolean) {
+                    gradeText.text=tr("grade")+": ${progress+1}"
+                }
+                override fun onStartTrackingTouch(v:SeekBar?){}
+                override fun onStopTrackingTouch(v:SeekBar?){}
+            })
+        }
+        layout.addView(gradeText)
+        layout.addView(grade)
+        val positionLabel=label("",14f,white)
+        val offset = SeekBar(this).apply {
+            max=160
+            progress=(80+(n.metresFromStart-original.metresFromStart).toInt()).coerceIn(0,160)
+            setOnSeekBarChangeListener(object: SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(v:SeekBar?,progress:Int,fromUser:Boolean) {
+                    val delta = progress-80
+                    positionLabel.text=tr("position")+": " +
+                        RallyDistanceFormatter.remaining(original.metresFromStart+delta) +
+                        "  (${if(delta>=0) "+" else ""}$delta m)"
+                }
+                override fun onStartTrackingTouch(v:SeekBar?){}
+                override fun onStopTrackingTouch(v:SeekBar?){}
+            })
+        }
+        positionLabel.text=tr("position")+": "+
+            RallyDistanceFormatter.remaining(n.metresFromStart)
+        layout.addView(positionLabel)
+        layout.addView(offset)
+        layout.addView(label(tr("modifiers"),12f,muted,true))
+        val options = mutableListOf("SIN MODIFICADOR")
+        (1..6).forEach { options += tr("close")+" $it" }
+        (1..6).forEach { options += tr("open")+" $it" }
+        val modifier = Spinner(this).apply {
+            adapter=ArrayAdapter(this@MainActivity,
+                android.R.layout.simple_spinner_dropdown_item,options)
+            setSelection(when {
+                n.tightensTo != null -> n.tightensTo
+                n.opensTo != null -> n.opensTo + 6
+                else -> 0
+            })
+        }
+        layout.addView(modifier)
+        layout.addView(label("DURACIÓN DE LA CURVA",12f,muted,true))
+        val longOption = Spinner(this).apply {
+            adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,
+                arrayOf("Automática","LARGA","NO LARGA"))
+            setSelection(when(n.manuallyLong){true->1;false->2;null->0})
+        }
+        layout.addView(longOption)
+        val feedback=label("",12f,"#FF907B")
+        layout.addView(feedback)
+        val scroll=ScrollView(this)
+        scroll.addView(layout)
+        val dialog=android.app.AlertDialog.Builder(this).setTitle(tr("edit_note"))
+            .setView(scroll)
+            .setPositiveButton(tr("save"),null)
+            .setNeutralButton(tr("restore"),null)
+            .setNegativeButton(tr("back")) { _,_ -> showRecce(index) }
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val g=grade.progress+1
+                val mod=modifier.selectedItemPosition
+                val updated=NoteCorrection(index,original.metresFromStart,
+                    original.metresFromStart+(offset.progress-80),
+                    if(direction.selectedItemPosition==0) PaceNote.Side.LEFT else PaceNote.Side.RIGHT,
+                    g,if(mod in 1..6) mod else null,if(mod in 7..12) mod-6 else null,
+                    when(longOption.selectedItemPosition){1->true;2->false;else->null})
+                val issue=EditablePacenotes.validate(base,updated)
+                if(issue!=null) { feedback.text=issue; return@setOnClickListener }
+                val proposed=noteEdits.filterNot { it.baseIndex==index }+updated
+                val prepared=EditablePacenotes.apply(base,proposed)
+                if(prepared.notes.zipWithNext().any { (a,b) -> b.metresFromStart-a.metresFromStart<5.0 }) {
+                    feedback.text="La nota se cruza con otra modificación"
+                    return@setOnClickListener
+                }
+                if(!noteEditsStore.save(base,proposed)) {
+                    feedback.text="No se pudo guardar en el teléfono"
+                    return@setOnClickListener
+                }
+                noteEdits.clear();noteEdits.addAll(proposed)
+                refreshManualNotes()
+                dialog.dismiss()
+                showRecce(index)
+            }
+            dialog.getButton(android.app.AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                dialog.dismiss()
+                resetEditedNote(index)
+            }
+        }
+        dialog.show()
     }
 
     private fun showPointOptions() {
