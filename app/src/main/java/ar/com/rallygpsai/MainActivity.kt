@@ -119,6 +119,7 @@ class MainActivity : Activity(), LocationListener {
     private lateinit var searchButton: TextView
     private lateinit var pointsButton: TextView
     private lateinit var settingsButton: TextView
+    private lateinit var historyButton: TextView
     private lateinit var nextCurveCaption: TextView
     private lateinit var destinationIndicator: TextView
     private lateinit var toolsRow: LinearLayout
@@ -338,6 +339,7 @@ class MainActivity : Activity(), LocationListener {
         voiceButton.text = if (voiceOn) tr("voice_on") else tr("voice_off")
         pointsButton.text = tr("points")
         settingsButton.text = tr("settings")
+        historyButton.contentDescription = tr("history")
         nextCurveCaption.text = tr("next")
         action.text = when {
             navigating || demo -> tr("finish")
@@ -604,12 +606,17 @@ class MainActivity : Activity(), LocationListener {
         }
         bottom.addView(actionRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(9) })
 
-        toolsRow = row(6) {
-            pointsButton = button(tr("points")).apply { setOnClickListener { showPointOptions() } }
-            add(pointsButton, 0,dp(46),1f)
-            add(button("GPX ↓").apply { setOnClickListener { importGpx() } }, 0,dp(46),1f)
-            add(button("GPX ↑").apply { setOnClickListener { exportGpx() } }, 0,dp(46),1f)
-            settingsButton = button(tr("settings")).apply { setOnClickListener { showSettings() } }
+        toolsRow = row(5) {
+            pointsButton = button(tr("points")).apply { textSize=11f; setOnClickListener { showPointOptions() } }
+            add(pointsButton, 0, dp(46),1f)
+            historyButton = button("HIST.").apply {
+                textSize=11f; contentDescription=tr("history")
+                setOnClickListener { showTripHistory() }
+            }
+            add(historyButton, 0, dp(46),1f)
+            add(button("GPX ↓").apply { textSize=11f;setOnClickListener { importGpx() } }, 0,dp(46),1f)
+            add(button("GPX ↑").apply { textSize=11f;setOnClickListener { exportGpx() } }, 0,dp(46),1f)
+            settingsButton = button(tr("settings")).apply { textSize=11f;setOnClickListener { showSettings() } }
             add(settingsButton,0,dp(46),1f)
         }
         bottom.addView(toolsRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
@@ -744,7 +751,7 @@ class MainActivity : Activity(), LocationListener {
             showDrivingControls(true)
             action.text = tr("go"); nextButton.text = "DEMO"
             resetNoteCard("#F0475A", "STOP", "NAVEGACIÓN DETENIDA", "Podés retomar el recorrido o trazar uno nuevo")
-            status("Recorrido guardado. Podés retomarlo.", false)
+            status(if (plan != null) "Recorrido finalizado. Revisá el historial para ver las estadísticas." else "Navegación detenida", false)
             return
         }
         if (plan != null && target == null) { startGpsNavigation(); return }
@@ -1534,6 +1541,101 @@ class MainActivity : Activity(), LocationListener {
             }
         }
     }
+    /** Finish an actual GPS trip. DEMO never creates a recorded speed or statistics. */
+    private fun finishRealTrip() {
+        val recorder = realTripRecorder ?: return
+        realTripRecorder = null
+        val record = recorder.finish(SystemClock.elapsedRealtime()) ?: return
+        thread {
+            runCatching { tripHistory.save(record) }.onFailure { failure ->
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) status(
+                        "No se pudo guardar el historial: " + (failure.message ?: "error de almacenamiento"), true)
+                }
+            }
+        }
+    }
+
+    private fun showTripHistory() {
+        if (navigating || demo) {
+            status("Finalizá el recorrido para consultar el historial", true)
+            return
+        }
+        thread {
+            val result = runCatching { tripHistory.list() }.getOrElse { emptyList() }
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                if (result.isEmpty()) {
+                    android.app.AlertDialog.Builder(this)
+                        .setTitle(tr("history"))
+                        .setMessage("Todavía no hay recorridos reales guardados. Las DEMO no generan estadísticas.")
+                        .setPositiveButton("CERRAR", null).show()
+                } else {
+                    val dateFormat = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale("es","AR"))
+                    val rows = result.mapIndexed { index,trip ->
+                        "Ruta " + (result.size-index) + " · " + dateFormat.format(Date(trip.startedAtWallMs)) +
+                        "\n" + String.format(Locale("es","AR"), "%.1f km  ·  %.0f km/h máx.",
+                            trip.distanceM/1000.0, trip.maximumKmh)
+                    }.toTypedArray()
+                    android.app.AlertDialog.Builder(this).setTitle(tr("history"))
+                        .setItems(rows) { _, index -> showTripDetails(result[index], result.size-index) }
+                        .setNegativeButton("CERRAR", null).show()
+                }
+            }
+        }
+    }
+
+    private fun showTripDetails(record: TripRecord, number: Int) {
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(12), dp(18), dp(12))
+            background = shape(bg, 14)
+        }
+        val preview = TripRoutePreview(this, record.actualTrack.ifEmpty { record.route })
+        root.addView(preview, LinearLayout.LayoutParams(-1, dp(160)))
+        val totalSeconds = record.durationMs / 1000
+        val h = totalSeconds / 3600
+        val m = (totalSeconds % 3600) / 60
+        val s = totalSeconds % 60
+        val duration = String.format(Locale.ROOT, "%02d:%02d:%02d",h,m,s)
+        val stats = String.format(Locale("es","AR"),
+            "TIEMPO\n%s\n\nDISTANCIA RECORRIDA\n%.2f km\n\nVELOCIDAD PROMEDIO\n%.1f km/h\n\nVELOCIDAD MÁXIMA\n%.1f km/h",
+            duration, record.distanceM/1000.0, record.averageKmh, record.maximumKmh)
+        root.addView(label(stats, 15f, white, true), LinearLayout.LayoutParams(-1,-2).apply {
+            topMargin=dp(16)
+        })
+        root.addView(label("Estadísticas estimadas a partir del GPS real. No incluyen DEMO.",
+            11f, muted),LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(12) })
+        val scroll = ScrollView(this)
+        scroll.addView(root)
+        android.app.AlertDialog.Builder(this).setTitle("RUTA $number")
+            .setView(scroll)
+            .setPositiveButton("REPETIR RUTA") { _, _ -> openStoredTrip(record, false) }
+            .setNeutralButton("VER MAPA") { _, _ -> openStoredTrip(record, true) }
+            .setNegativeButton("ELIMINAR") { _, _ ->
+                android.app.AlertDialog.Builder(this)
+                    .setTitle("¿Eliminar recorrido?")
+                    .setMessage("Se borrará el registro guardado en este teléfono.")
+                    .setPositiveButton("ELIMINAR") { _, _ ->
+                        thread { tripHistory.delete(record.id) }
+                    }
+                    .setNegativeButton("CANCELAR", null).show()
+            }.show()
+    }
+
+    private fun openStoredTrip(record: TripRecord, viewActualTrack: Boolean) {
+        if (navigating || demo) return
+        val points = if (viewActualTrack && record.actualTrack.size >= 2)
+            record.actualTrack else record.route
+        execute(if(viewActualTrack) "Mostrando trazado registrado" else "Preparando recorrido guardado", {
+            PaceNoteEngine.createPlan(points)
+        }) { result ->
+            setPreparedPlan(result as RoutePlan, true)
+            status(if (viewActualTrack) "Trazado registrado cargado en el mapa"
+                else "Ruta guardada lista: podés iniciar GPS o DEMO",false)
+        }
+    }
+
     private fun showPointOptions() {
         val choices = arrayOf(tr("destination_point"), tr("origin_point"), tr("via_point"),
             tr("gps_origin"), tr("clear_stops"))
