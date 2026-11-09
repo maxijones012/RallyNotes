@@ -190,13 +190,13 @@ class MainActivity : Activity(), LocationListener {
                 if (recceMapSelection && !navigating && !demo) {
                     recceMapSelection = false
                     val route = plan
-                    val selected = route?.notes?.indices?.minByOrNull { index ->
+                    val selected = if (route != null) route.notes.indices.minByOrNull { index ->
                         val n = route.notes[index]
                         val k=route.metresAtPoint.binarySearch(n.metresFromStart).let {
                             if(it<0) -it-1 else it
                         }.coerceIn(0,route.points.lastIndex)
                         DrivingCamera.distance(route.points[k], GeoPoint(position.latitude,position.longitude))
-                    }
+                    } else null
                     if(selected!=null && route!=null) {
                         val note=route.notes[selected]
                         val k=route.metresAtPoint.binarySearch(note.metresFromStart).let {
@@ -1777,6 +1777,8 @@ class MainActivity : Activity(), LocationListener {
         android.app.AlertDialog.Builder(this).setTitle(tr("recce") + " · ${route.notes.size} notas")
             .setItems(labels) { _, i -> showRecceNote(i) }
             .setNeutralButton("ELEGIR EN MAPA") { _, _ ->
+                destinationTapArmed = false
+                mapSelectMode = 0
                 recceMapSelection = true
                 status("Tocá una curva resaltada en el mapa para revisarla", false)
                 Toast.makeText(this, "Tocá una curva del recorrido", Toast.LENGTH_LONG).show()
