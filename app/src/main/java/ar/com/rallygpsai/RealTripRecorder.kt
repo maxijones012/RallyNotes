@@ -34,7 +34,7 @@ class RealTripRecorder(
         // Do not use DEMO velocity, noisy location fixes, or impossible position jumps.
         val current = last
         val dt = clockMs - lastMs
-        if (current != null && dt in 200..20_000) {
+        if (current != null && dt in 200L..20_000L) {
             val distance = distanceBetween(current, point)
             val limit = max(25.0, gpsSpeedMps * (dt / 1000.0) * 2.6 + 15.0)
             if (distance > limit) {
