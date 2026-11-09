@@ -174,7 +174,7 @@ object RallyLanguage {
         pieces += side + " " + note.grade
         note.tightensTo?.takeIf { it < note.grade }?.let { pieces += text(l, "close") + " " + it }
         note.opensTo?.takeIf { it > note.grade }?.let { pieces += text(l, "open") + " " + it }
-        if (note.endMetres - note.metresFromStart >= 95.0 || (note.cumulativeTurnDegrees >= 95 && note.grade >= 3)) pieces += text(l, "long")
+        if (note.manuallyLong ?: (note.endMetres - note.metresFromStart >= 95.0 || (note.cumulativeTurnDegrees >= 95 && note.grade >= 3))) pieces += text(l, "long")
         if (next != null && next.metresFromStart - note.endMetres in 0.0..85.0) {
             val nside = if (next.side == PaceNote.Side.LEFT) text(l, "left") else text(l, "right")
             pieces += text(l, "linked") + " " + nside + " " + next.grade
