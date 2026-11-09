@@ -30,7 +30,7 @@ class RealTripRecorderTest {
         val recorder = RealTripRecorder(1_000L,0L,listOf(start,moved))
         recorder.accept(start, 10f, 5f, 0)
         recorder.accept(GeoPoint(-43.26,-65.27), 10f, 5f, 1000)
-        recorder.accept(moved, 12f, 5f, 10000)
+        recorder.accept(moved, 1f, 5f, 2000)
         assertNull(recorder.finish(20000))
     }
 }
