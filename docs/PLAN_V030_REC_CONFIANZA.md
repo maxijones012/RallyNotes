@@ -43,3 +43,15 @@
 7. Gradle `testDebugUnitTest` y `assembleDebug` deben pasar antes de entregar APK.
 
 **Limitación:** los proveedores externos y datos OSM pueden contener errores; la validación geométrica no equivale a un levantamiento de campo. Para cualquier prueba conduciendo, utilizar copiloto/pasajero y respetar las normas de tránsito.
+
+## Estado de implementación — 9 de noviembre de 2026
+
+- [x] Etapa 1: modelo editable, validación y guardado privado por huella SHA-256 de la ruta.
+- [x] Etapa 2: modo RECONOCIMIENTO, lista de notas, enfoque de curva, selección en mapa, voz, editor, restablecer.
+- [x] Etapa 3: inspección de respuestas de OSRM (waypoints ajustados, geometría, tramos discontinuos, distancias), rechazo de rutas erróneas, confirmación de las dudosas y recálculo conservador.
+- [x] Compatibilidad con GPX, rutas restauradas, historial 0.2.9, panel de notas, DEMO y cuenta regresiva.
+- [x] Cota de memoria para muestreo de trazados largos.
+- [x] Pruebas unitarias incorporadas y revisión estática previa a compilar.
+- [ ] Etapa 4, último paso: GitHub Actions/JUnit/Gradle APK y entrega tras aprobar.
+
+Notas de seguridad: ninguna opción estima el estado de la calzada o una velocidad segura; el reconocimiento y edición están deshabilitados durante GPS/DEMO. Las correcciones son locales y no se comparten con OSRM.
