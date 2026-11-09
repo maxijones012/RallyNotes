@@ -421,7 +421,7 @@ class MainActivity : Activity(), LocationListener {
         } else {
             val details = mutableListOf<String>()
             if (note.cumulativeTurnDegrees >= 145 && note.grade <= 2) details += tr("hairpin")
-            if (note.endMetres-note.metresFromStart >= 95.0 || (note.cumulativeTurnDegrees >= 95 && note.grade >= 3)) details += tr("long")
+            if (note.manuallyLong ?: (note.endMetres-note.metresFromStart >= 95.0 || (note.cumulativeTurnDegrees >= 95 && note.grade >= 3))) details += tr("long")
             note.tightensTo?.let { if (it < note.grade) details += tr("close") + " " + it }
             note.opensTo?.let { if (it > note.grade) details += tr("open") + " " + it }
             if (display.lowConfidence) details += tr("approx")
