@@ -105,6 +105,7 @@ class MainActivity : Activity(), LocationListener {
     private lateinit var primaryNoteTile: RallyNoteTile
     private lateinit var linkedNoteTile: RallyNoteTile
     private lateinit var linkedNoteLabel: TextView
+    private lateinit var afterNextHint: TextView
     private lateinit var linkedNoteColumn: LinearLayout
     private lateinit var info: TextView
     private lateinit var tripDistance: TextView
@@ -416,11 +417,22 @@ class MainActivity : Activity(), LocationListener {
             if (display.lowConfidence) details += tr("approx")
             details.joinToString(" · ").ifBlank { tr("note") }
         }
-        val linked = display.chained
-        linkedNoteColumn.visibility = if (linked == null) View.GONE else View.VISIBLE
-        if (linked != null) {
-            linkedNoteTile.show(linked.grade, linked.side)
-            linkedNoteLabel.text = tr("linked")
+        // Show the next note all the time, not only when curves are tightly linked.
+        // Index is advanced by NavigationEngine as the car crosses each bend.
+        val window = plan?.let { route ->
+            RollingNotes.at(route, currentNote, (note.metresFromStart - distanceMetres).coerceAtLeast(0.0))
+        }
+        val upcoming = window?.next ?: next
+        linkedNoteColumn.visibility = if (upcoming == null) View.GONE else View.VISIBLE
+        if (upcoming != null) {
+            linkedNoteTile.show(upcoming.grade, upcoming.side)
+            linkedNoteLabel.text = if (window?.linked == true) tr("linked") else tr("queue_next")
+        }
+        val third = window?.afterNext
+        afterNextHint.visibility = if (third == null) View.GONE else View.VISIBLE
+        if (third != null) {
+            val direction = if (third.side == PaceNote.Side.LEFT) tr("left") else tr("right")
+            afterNextHint.text = tr("queue_after") + ": " + direction + " " + third.grade
         }
     }
 
@@ -429,6 +441,7 @@ class MainActivity : Activity(), LocationListener {
         nextTurnDistance.visibility = View.GONE
         primaryNoteTile.visibility = View.GONE
         linkedNoteColumn.visibility = View.GONE
+        afterNextHint.visibility = View.GONE
         noteTitle.text = headline
         noteDetail.text = subline
     }
@@ -535,11 +548,17 @@ class MainActivity : Activity(), LocationListener {
             addView(noteWords, LinearLayout.LayoutParams(0, -2, 1f))
             addView(linkedNoteColumn, LinearLayout.LayoutParams(dp(66), -2).apply { marginStart = dp(6) })
         }
+        afterNextHint = label("", 11f, muted, true).apply {
+            visibility = View.GONE
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        }
         val noteContent = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(10), dp(7), dp(10), dp(10))
             addView(nextTurnDistance, LinearLayout.LayoutParams(-1, -2))
             addView(paceRow, LinearLayout.LayoutParams(-1, -2))
+            addView(afterNextHint, LinearLayout.LayoutParams(-1,-2).apply { topMargin = dp(5) })
         }
         noteCard = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
