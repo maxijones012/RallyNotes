@@ -67,14 +67,15 @@ jobs:
           VERSION=v0.3.0
           cp app/build/outputs/apk/debug/app-debug.apk "Rally_GPS_AI_${VERSION}.apk"
           cat > release_notes.txt <<'EOF'
-          Rally GPS AI 0.2.7 (versión de prueba para Android)
+          Rally GPS AI 0.3.0 (versión de prueba para Android)
 
-          - Interfaz más limpia: se quitó el encabezado grande.
-          - Botones de 3D y VOZ abajo a la derecha.
-          - Ajustes organizados por Navegación, Voz, Mapa e Idioma.
-          - Vehículos GPS más grandes con tamaños Normal, Grande y Extra grande.
-          - Selección de 24 marcadores, notas de rally y copiloto contextual.
-          - Distancias habladas hasta 1.000 metros y audios CarlFM sin conexión.
+          - RECONOCIMIENTO: revisar curvas en lista y sobre el mapa, escuchar notas y avanzar entre ellas.
+          - Editor de notas: ajustar izquierda/derecha, grado 1–6, punto de aviso, larga, abre y cierra.
+          - Correcciones guardadas localmente por ruta; no modifican ni crean calles.
+          - Ruteo OSRM: verificar geometría, posiciones ajustadas a calles y distancias.
+          - Las rutas dudosas requieren confirmación; un recálculo inválido conserva el trazado anterior.
+          - Mantiene notas encadenadas, modo compacto, 3-2-1-GO, historial y estadísticas GPS reales.
+          - Mantiene Subaru, selección de vehículos, idiomas, voces CarlFM y copiloto contextual.
 
           APK de prueba (debug): podés instalarla manualmente en Android. Algunas actualizaciones pueden exigir desinstalar la versión anterior si la firma es diferente. Respaldá tus GPX primero.
           Las notas derivadas del mapa son aproximadas y no sustituyen la señalización ni la conducción segura.
