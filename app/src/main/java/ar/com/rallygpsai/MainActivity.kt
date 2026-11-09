@@ -866,6 +866,7 @@ class MainActivity : Activity(), LocationListener {
         noteEdits.clear()
         noteEdits.addAll(noteEditsStore.load(source))
         recceNoteIndex = null
+        recceMapSelection = false
         return EditablePacenotes.apply(source, noteEdits)
     }
 
