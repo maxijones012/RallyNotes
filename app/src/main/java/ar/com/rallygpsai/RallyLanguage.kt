@@ -50,7 +50,7 @@ object RallyLanguage {
         "settings_map" to "MAPA Y VEHÍCULO", "settings_map_desc" to "Seleccionar auto y cambiar tamaño",
         "settings_app" to "IDIOMA E INFORMACIÓN", "settings_app_desc" to "Idioma y licencias",
         "vehicle_size" to "Tamaño del vehículo GPS", "size_normal" to "Normal",
-        "size_large" to "Grande", "size_xl" to "Extra grande", "back" to "ATRÁS"
+        "size_large" to "Grande", "size_xl" to "Extra grande", "back" to "ATRÁS", "queue_next" to "SIGUE", "queue_after" to "DESPUÉS", "history" to "HISTORIAL"
     )
     private val en = mapOf(
         "welcome" to "Welcome to Rally GPS AI!", "select" to "Choose your navigation and co-driver language.",
@@ -84,7 +84,7 @@ object RallyLanguage {
         "settings_map" to "MAP & VEHICLE", "settings_map_desc" to "Vehicle selection and size",
         "settings_app" to "LANGUAGE & INFO", "settings_app_desc" to "Language and licenses",
         "vehicle_size" to "GPS vehicle size", "size_normal" to "Normal",
-        "size_large" to "Large", "size_xl" to "Extra large", "back" to "BACK"
+        "size_large" to "Large", "size_xl" to "Extra large", "back" to "BACK", "queue_next" to "NEXT", "queue_after" to "THEN", "history" to "HISTORY"
     )
     private val pt = mapOf(
         "welcome" to "Bem-vindo ao Rally GPS AI!", "select" to "Escolha o idioma da navegação e do copiloto.",
@@ -118,7 +118,7 @@ object RallyLanguage {
         "settings_map" to "MAPA E VEÍCULO", "settings_map_desc" to "Escolher veículo e tamanho",
         "settings_app" to "IDIOMA E INFORMAÇÕES", "settings_app_desc" to "Idioma e licenças",
         "vehicle_size" to "Tamanho do veículo no GPS", "size_normal" to "Normal",
-        "size_large" to "Grande", "size_xl" to "Extra grande", "back" to "VOLTAR"
+        "size_large" to "Grande", "size_xl" to "Extra grande", "back" to "VOLTAR", "queue_next" to "SEGUE", "queue_after" to "DEPOIS", "history" to "HISTÓRICO"
     )
     fun text(code: String, key: String): String = when {
         normalized(code).startsWith("en") -> en[key]
