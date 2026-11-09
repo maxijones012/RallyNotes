@@ -830,19 +830,34 @@ class MainActivity : Activity(), LocationListener {
         val origin = chosenOrigin ?: gps ?: run { status("Necesito GPS o un origen manual", true); requestGps(); return }
         val destination = target ?: return
         val stops = intermediatePoints.toList()
-        execute("Calculando ruta (servidor demo)", {
-            PaceNoteEngine.createPlan(RouteServices.route(origin, stops, destination))
+        execute("Calculando ruta (OSRM demo)", {
+            val response=RouteServices.routeVerified(origin, stops, destination)
+            Pair(PaceNoteEngine.createPlan(response.points),response.inspection)
         }) { result ->
-            setPreparedPlan(result as RoutePlan, true)
-            routeDestination = destination
-            pendingStops = stops
-            prefs.edit()
-                .putString("last_road_destination", RouteStore.serialize(listOf(destination)))
-                .putString("last_road_stops", RouteStore.serialize(stops)).apply()
-            target = null
-            updateDestinationIndicator("DESTINO DE LA RUTA")
-            drawWaypoints()
-            status("Ruta calculada. Si te desviás, intentará recalcular con internet.", false)
+            val verified=result as Pair<*,*>
+            val prepared=verified.first as RoutePlan
+            val assessment=verified.second as RoadInspection
+            val accept: () -> Unit = {
+                setPreparedPlan(prepared,true)
+                routeDestination=destination
+                pendingStops=stops
+                prefs.edit()
+                    .putString("last_road_destination", RouteStore.serialize(listOf(destination)))
+                    .putString("last_road_stops", RouteStore.serialize(stops)).apply()
+                target=null
+                updateDestinationIndicator("DESTINO DE LA RUTA")
+                drawWaypoints()
+                status(if(assessment.reviewRequired) tr("route_warning") else
+                    "Ruta calculada y lista para revisar en el mapa",false)
+            }
+            if(assessment.reviewRequired) {
+                android.app.AlertDialog.Builder(this).setTitle(tr("check_route"))
+                    .setMessage(tr("route_warning")+"\n\n"+
+                        assessment.reasons.joinToString("\n")+
+                        "\n\nOSRM usa OpenStreetMap; comprobá las calles antes de iniciar.")
+                    .setPositiveButton("ACEPTAR RUTA") { _,_ -> accept() }
+                    .setNegativeButton("CANCELAR",null).show()
+            } else accept()
         }
     }
     /** Apply only corrections stored for exactly this route's geometry. */
@@ -1086,7 +1101,11 @@ class MainActivity : Activity(), LocationListener {
         status("Recalculando recorrido desde tu GPS…", false)
         thread {
             try {
-                val updated = PaceNoteEngine.createPlan(RouteServices.route(current, stopsAhead, destination))
+                val checked=RouteServices.routeVerified(current, stopsAhead, destination)
+                // Never replace an active road path with a route that needs manual verification.
+                if(checked.inspection.reviewRequired)
+                    error("Nueva ruta sospechosa: " + checked.inspection.reasons.joinToString("; "))
+                val updated = PaceNoteEngine.createPlan(checked.points)
                 runOnUiThread {
                     if (session == navigationSession && navigating && !demo && routeDestination == destination && plan === oldPlan) {
                         val edited = correctedRoute(updated)
@@ -1109,7 +1128,7 @@ class MainActivity : Activity(), LocationListener {
             } catch (e: Exception) {
                 runOnUiThread {
                     if (session == navigationSession && navigating) {
-                        status("No pude recalcular sin conexión. Se conserva el recorrido anterior.", true)
+                        status("No se pudo validar el recálculo. Se conserva la ruta anterior.", true)
                     }
                     reroutePolicy.completeAttempt()
                 }
