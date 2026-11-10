@@ -1639,11 +1639,12 @@ class MainActivity : Activity(), LocationListener {
             visibility(if (activeCar) Property.NONE else Property.VISIBLE))
     }
 
-    private fun installMapStyle(current: MapLibreMap = map ?: return) {
+    private fun installMapStyle(current: MapLibreMap? = map) {
+        val activeMap = current ?: return
         vehicleImageStyle = null
         vehicleImageKeys.clear()
         lastRenderedProgress = -1000.0
-        current.setStyle(Style.Builder().fromUri(mapVisualStyle.url)) {
+        activeMap.setStyle(Style.Builder().fromUri(mapVisualStyle.url)) {
             drawPlan()
             drawWaypoints()
             drawRoadBumps()
