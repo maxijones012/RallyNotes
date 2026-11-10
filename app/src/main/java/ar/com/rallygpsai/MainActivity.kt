@@ -61,7 +61,7 @@ class MainActivity : Activity(), LocationListener {
     private var target: GeoPoint? = null
     private var chosenOrigin: GeoPoint? = null
     private val intermediatePoints = mutableListOf<GeoPoint>()
-    private var mapSelectMode = 0 // 0 destino, 1 origen, 2 parada
+    private var mapSelectMode = 0 // 0 destino, 1 origen, 2 parada, 3 reductor manual
     private var destinationTapArmed = false // activado sólo desde PUNTOS → señalar destino
     private var chosenDestinationText = "PUNTO MARCADO"
     private var chosenDestinationApproximate = false
@@ -90,6 +90,11 @@ class MainActivity : Activity(), LocationListener {
     private var lastNoteDistanceM = 0.0
     private var lastRemainingMetres = 0.0
     private val contextualCopilot = ContextCopilot()
+    private val manualBumpStore by lazy { ManualTrafficCalmingStore(this) }
+    private var roadBumps = emptyList<RouteBump>()
+    private val announcedBumps = mutableSetOf<String>()
+    private var bumpLookupSession = 0L
+    private lateinit var bumpBanner: TextView
     private var lastPriorityNoteAtMs = -1L
     private var contextualCommentIndex = 0
     private var firstGpsCamera = true
@@ -164,12 +169,20 @@ class MainActivity : Activity(), LocationListener {
             loaded.setStyle(Style.Builder().fromUri("https://tiles.openfreemap.org/styles/dark")) {
                 drawPlan()
                 drawWaypoints()
+                drawRoadBumps()
                 drawLocation()
             }
             loaded.addOnMapLongClickListener { latlng ->
                 val point = GeoPoint(latlng.latitude, latlng.longitude)
                 when (mapSelectMode) {
                     1 -> { chosenOrigin = point; status("Origen elegido manualmente", false) }
+                    3 -> {
+                        if (!navigating && !demo) {
+                            manualBumpStore.add(point)
+                            Toast.makeText(this, "Reductor guardado en este teléfono", Toast.LENGTH_SHORT).show()
+                            refreshRoadBumps()
+                        }
+                    }
                     2 -> {
                         if (intermediatePoints.size < 4) {
                             intermediatePoints.add(point)
@@ -606,6 +619,13 @@ class MainActivity : Activity(), LocationListener {
             addView(noteContent, LinearLayout.LayoutParams(0, -2, 1f))
         }
         top.addView(noteCard, LinearLayout.LayoutParams(-1,-2).apply { topMargin = dp(10) })
+        bumpBanner = label("", 12f, "#241900", true).apply {
+            visibility = View.GONE
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12),dp(8),dp(12),dp(8))
+            background = shape("#F9C95E", 10, "#FFDE83")
+        }
+        top.addView(bumpBanner, LinearLayout.LayoutParams(-1,-2).apply { topMargin = dp(7) })
         resetNoteCard(sky, "RALLY GPS AI", tr("dest"), tr("dest_sub"))
 
         root.addView(top, FrameLayout.LayoutParams(-1,-2,Gravity.TOP).apply {
@@ -819,6 +839,7 @@ class MainActivity : Activity(), LocationListener {
             navigating = false; demo = false; tts?.stop(); rallyAudio.stop(); lastSpoken = -1
             contextualCopilot.reset(); lastPriorityNoteAtMs = -1L
             showDrivingControls(true)
+            bumpBanner.visibility = View.GONE
             action.text = tr("go"); nextButton.text = "DEMO"
             resetNoteCard("#F0475A", "STOP", "NAVEGACIÓN DETENIDA", "Podés retomar el recorrido o trazar uno nuevo")
             status(if (plan != null) "Recorrido finalizado. Revisá el historial para ver las estadísticas." else "Navegación detenida", false)
@@ -901,6 +922,7 @@ class MainActivity : Activity(), LocationListener {
         lastRemainingMetres = parsed.totalMetres
         tripDistance.text = "$km km " + tr("remaining")
         drawPlan()
+        refreshRoadBumps()
         if (save && parsed.points.size <= 30000) prefs.edit().putString("last_route", RouteStore.serialize(parsed.points)).apply()
         val center = parsed.points[parsed.points.size/2]
         map?.animateCamera(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder()
@@ -1049,6 +1071,8 @@ class MainActivity : Activity(), LocationListener {
             val follow = route.notes.getOrNull(result.noteIndex+1)
             updateNoteCard(next, follow, result.distanceToNoteM)
         }
+        updateRoadBumpWarning(result.fix.metres, result.distanceToNoteM, speed.toDouble(),
+            result.announcement != null, now)
         if (result.announcement != null) lastPriorityNoteAtMs = now
         result.announcement?.let { message ->
             if (result.noteIndex >= 0 && !result.arrived) {
@@ -1082,6 +1106,7 @@ class MainActivity : Activity(), LocationListener {
             contextualCopilot.reset()
             reroutePolicy.reset()
             navigating = false; demo = false; action.text = tr("go")
+            bumpBanner.visibility = View.GONE
             showDrivingControls(true)
         }
     }
@@ -1119,6 +1144,7 @@ class MainActivity : Activity(), LocationListener {
                             .putString("last_route", RouteStore.serialize(updated.points))
                             .putString("last_road_stops", RouteStore.serialize(stopsAhead)).apply()
                         drawPlan()
+                        refreshRoadBumps()
                         updateProgress(current, lastLocation?.speed ?: 0f)
                         status("Nueva ruta calculada · notas actualizadas", false)
                         say("Ruta recalculada. Nuevas notas disponibles.")
@@ -2009,7 +2035,8 @@ class MainActivity : Activity(), LocationListener {
 
     private fun showPointOptions() {
         val choices = arrayOf(tr("destination_point"), tr("origin_point"), tr("via_point"),
-            tr("gps_origin"), tr("clear_stops"))
+            tr("gps_origin"), tr("clear_stops"), "Agregar reductor en el mapa",
+            "Borrar reductores manuales")
         android.app.AlertDialog.Builder(this).setTitle(tr("points_title"))
             .setItems(choices) { _, index ->
                 when (index) {
@@ -2021,6 +2048,20 @@ class MainActivity : Activity(), LocationListener {
                     }
                     3 -> { chosenOrigin = null; drawWaypoints(); status("Origen: GPS actual", false) }
                     4 -> { intermediatePoints.clear(); drawWaypoints(); status("Paradas eliminadas", false) }
+                    5 -> {
+                        if (navigating || demo) {
+                            status("Detené la navegación antes de marcar un reductor", true)
+                        } else {
+                            mapSelectMode = 3
+                            Toast.makeText(this, "Mantené pulsado el lugar del reductor",Toast.LENGTH_LONG).show()
+                        }
+                    }
+                    6 -> android.app.AlertDialog.Builder(this)
+                        .setTitle("Borrar reductores agregados")
+                        .setMessage("Se eliminarán solo los reductores marcados por vos. Los de OpenStreetMap no se modifican.")
+                        .setPositiveButton("BORRAR") { _, _ ->
+                            manualBumpStore.clear(); refreshRoadBumps()
+                        }.setNegativeButton("CANCELAR",null).show()
                 }
             }.setNegativeButton("CERRAR",null).show()
     }
