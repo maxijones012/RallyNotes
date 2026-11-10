@@ -44,34 +44,59 @@ jobs:
               print('Recursos raw de CarlFM en APK:',len(names))
               assert len(names) >= 130, 'Faltan clips pregrabados en APK'
           PY
+      - name: Verificar integridad y firma de APK
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import zipfile
+          apk=Path("app/build/outputs/apk/debug/app-debug.apk")
+          assert apk.is_file() and apk.stat().st_size > 1000000
+          with zipfile.ZipFile(apk) as z:
+              assert z.testzip() is None, "ZIP corrupto"
+              names=set(z.namelist())
+              assert "AndroidManifest.xml" in names
+              assert "classes.dex" in names
+              assert "resources.arsc" in names
+          print("APK: contenido e integridad correctos")
+          PY
+          SIGNER="$(find "$ANDROID_HOME/build-tools" -maxdepth 2 -type f -name apksigner | sort -V | tail -1)"
+          test -n "$SIGNER"
+          "$SIGNER" verify --verbose --print-certs app/build/outputs/apk/debug/app-debug.apk
+
       - name: Publicar APK descargable
         uses: actions/upload-artifact@v4
         with:
-          name: Rally-GPS-AI-v0.3.1-CarlFM-debug
+          name: Rally-GPS-AI-v0.3.2-CarlFM-debug
           path: app/build/outputs/apk/debug/app-debug.apk
           retention-days: 14
 
-      - name: Publicar Release v0.3.1 con APK
+      - name: Publicar Release v0.3.2 con APK
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          VERSION=v0.3.1
+          VERSION=v0.3.2
           cp app/build/outputs/apk/debug/app-debug.apk "Rally_GPS_AI_${VERSION}.apk"
           cat > release_notes.txt <<'EOF'
-          Rally GPS AI 0.3.1 — mejoras de mapa y vehículos (versión de prueba)
+          Rally GPS AI 0.3.2 — refuerzo de navegación y usabilidad (PRE-RELEASE)
 
-          - Pines visibles para origen, destino y paradas, con símbolos contrastados.
-          - Buscador oculto durante GPS/DEMO y sin cartel verde duplicado de destino.
-          - Galería de vehículos de dos columnas con miniaturas y nombres más grandes.
-          - Ajustes accesibles mediante un engranaje.
-          - Reductores desde puntos OSM traffic_calming/hazard=bump cercanos al trazado,
-            y opción para marcarlos manualmente desde PUNTOS.
-          - Avisos visuales y audio opcional sin interrumpir curvas prioritarias.
-          - Un reductor ausente de OSM no se puede detectar automáticamente.
-          - Se mantienen notas, modos GPS/DEMO, historial, GPX y voces CarlFM.
-          - Plan de 200 pasos: docs/PLAN_MAESTRO_200_MEJORAS.md.
-            Persisten tareas de validación visual y seguridad en el teléfono.
+          - GPS y DEMO con interfaz más limpia, controles de planificación en dos filas.
+          - La ruta recorrida se diferencia visualmente de lo que queda por delante.
+          - Cambio de mapa noche/día desde Ajustes, sin perder el trazado.
+          - Filtro de GPS impreciso/antiguo y permiso preciso antes de navegar.
+          - Una ruta GPX no habilita recálculo automático de calles OSRM.
+          - DEMO: PAUSA/REANUDAR real con conservación de posición y notas.
+          - Movimiento interpolado del Subaru, sin saltos entre vértices.
+          - Evita edición del mapa mientras hay GPS/DEMO en marcha.
+          - Pantalla despierta durante navegación; teclado oculto tras elegir destino.
+          - Voz de reductores señalados en OSM/manuales, sin interrumpir notas de curva.
+          - Traducciones y pruebas de regresión en navegación, vehículos, voz y GPX.
+          - Verificación de firma, contenido y clips offline en GitHub Actions.
+
+          Manual de validación: docs/VALIDACION_MOTOROLA_0.3.2.md
+          Registro de mejoras: docs/CHANGELOG_0.3.2.md
+          Seguimiento de 200 tareas: docs/PLAN_MAESTRO_200_MEJORAS.md
+          IMPORTANTE: las verificaciones en teléfono y rutas reales siguen pendientes.
 
           APK de prueba (debug): podés instalarla manualmente en Android. Algunas actualizaciones pueden exigir desinstalar la versión anterior si la firma es diferente. Respaldá tus GPX primero.
           Las notas derivadas del mapa son aproximadas y no sustituyen la señalización ni la conducción segura.
