@@ -81,6 +81,7 @@ class MainActivity : Activity(), LocationListener {
     private var vehicleImageStyle: Style? = null
     private val vehicleImageKeys = mutableSetOf<String>()
     private var followRouteCamera = true
+    private var lastRenderedProgress = -1000.0
     private var voiceOn = true
     private var appLanguage = "es-AR"
     private var warnFactor = 1
@@ -656,29 +657,41 @@ class MainActivity : Activity(), LocationListener {
         }
         bottom.addView(actionRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(9) })
 
-        toolsRow = row(4) {
-            pointsButton = button(tr("points")).apply { textSize=10f; setOnClickListener { showPointOptions() } }
-            add(pointsButton, 0, dp(46),1f)
+        toolsRow = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val mainTools = row(8) {
+            pointsButton = button(tr("points")).apply { textSize=13f; contentDescription="Marcar origen, destino o reductor"; setOnClickListener { showPointOptions() } }
+            add(pointsButton, 0, dp(50),1f)
             recceButton = button(tr("recce_short")).apply {
-                textSize=10f; contentDescription=tr("recce")
+                textSize=13f; contentDescription=tr("recce")
                 setOnClickListener { showRecce() }
             }
-            add(recceButton, 0, dp(46),1f)
+            add(recceButton, 0, dp(50),1f)
             historyButton = button("HIST.").apply {
-                textSize=10f; contentDescription=tr("history")
+                textSize=13f; contentDescription=tr("history")
                 setOnClickListener { showTripHistory() }
             }
-            add(historyButton, 0, dp(46),1f)
-            add(button("GPX ↓").apply { textSize=10f;setOnClickListener { importGpx() } }, 0,dp(46),1f)
-            add(button("GPX ↑").apply { textSize=10f;setOnClickListener { exportGpx() } }, 0,dp(46),1f)
-            settingsButton = button("⚙").apply {
-                textSize=21f
-                contentDescription=tr("settings")
+            add(historyButton, 0, dp(50),1f)
+        }
+        val secondaryTools = row(8) {
+            add(button("IMPORTAR ↓").apply {
+                textSize=12f; contentDescription="Importar ruta GPX"
+                setOnClickListener { importGpx() }
+            }, 0, dp(50), 1f)
+            add(button("EXPORTAR ↑").apply {
+                textSize=12f; contentDescription="Guardar ruta GPX"
+                setOnClickListener { exportGpx() }
+            }, 0, dp(50), 1f)
+            settingsButton = button("⚙  AJUSTES").apply {
+                textSize=13f; contentDescription=tr("settings")
                 tooltipText=tr("settings")
                 setOnClickListener { showSettings() }
             }
-            add(settingsButton,0,dp(46),1f)
+            add(settingsButton,0,dp(50),1f)
         }
+        toolsRow.addView(mainTools)
+        toolsRow.addView(secondaryTools, LinearLayout.LayoutParams(-1,-2).apply {
+            topMargin=dp(7)
+        })
         bottom.addView(toolsRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
         bottomPanel = bottom
         root.addView(bottom, FrameLayout.LayoutParams(-1,-2,Gravity.BOTTOM).apply {
@@ -921,6 +934,8 @@ class MainActivity : Activity(), LocationListener {
         lastRemainingMetres = parsed.totalMetres
         tripDistance.text = "$km km " + tr("remaining")
         drawPlan()
+        lastRenderedProgress = -1000.0
+        updateRouteProgress(0.0)
         refreshRoadBumps()
         if (save && parsed.points.size <= 30000) prefs.edit().putString("last_route", RouteStore.serialize(parsed.points)).apply()
         val center = parsed.points[parsed.points.size/2]
@@ -1061,6 +1076,7 @@ class MainActivity : Activity(), LocationListener {
         val remaining = (route.totalMetres-result.fix.metres).coerceAtLeast(0.0)
         lastRemainingMetres = remaining
         currentNote = result.noteIndex.coerceAtLeast(0)
+        updateRouteProgress(result.fix.metres)
         info.text = (if (demo) "DEMO · " else "") + "${(speed*3.6).toInt().coerceAtLeast(0)} km/h"
         tripDistance.text = RallyDistanceFormatter.remaining(remaining) + " " + tr("remaining")
         val next = route.notes.getOrNull(result.noteIndex)
@@ -1143,6 +1159,8 @@ class MainActivity : Activity(), LocationListener {
                             .putString("last_route", RouteStore.serialize(updated.points))
                             .putString("last_road_stops", RouteStore.serialize(stopsAhead)).apply()
                         drawPlan()
+                        lastRenderedProgress = -1000.0
+                        updateRouteProgress(0.0)
                         refreshRoadBumps()
                         updateProgress(current, lastLocation?.speed ?: 0f)
                         status("Nueva ruta calculada · notas actualizadas", false)
@@ -1297,6 +1315,30 @@ class MainActivity : Activity(), LocationListener {
         if (voiceOn && speakReady) tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "rally_${System.nanoTime()}")
     }
 
+    /** The completed section is only a visual layer; notes/routing remain unchanged. */
+    private fun updateRouteProgress(progressM: Double) {
+        val route = plan ?: return
+        val style = map?.style ?: return
+        if (!progressM.isFinite() || kotlin.math.abs(progressM-lastRenderedProgress) < 8.0) return
+        val split = RouteProgressGeometry.at(route, progressM)
+        val points = split.travelled
+        if(points.size < 2) return
+        val line = Feature.fromGeometry(LineString.fromLngLats(points.map {
+            Point.fromLngLat(it.longitude,it.latitude)
+        }))
+        val collection = FeatureCollection.fromFeatures(arrayOf(line))
+        val source = style.getSourceAs<GeoJsonSource>("rally_completed_route")
+        if(source == null) {
+            style.addSource(GeoJsonSource("rally_completed_route",collection))
+            val layer=LineLayer("rally_completed_line","rally_completed_route").withProperties(
+                lineColor("#4B6177"),lineWidth(7f),lineOpacity(0.90f))
+            if(style.getLayer("rally_curves_layer") != null)
+                style.addLayerBelow(layer,"rally_curves_layer")
+            else style.addLayer(layer)
+        } else source.setGeoJson(collection)
+        lastRenderedProgress = progressM
+    }
+
     private fun drawPlan() {
         val s = map?.style ?: return
         val p = plan ?: return
@@ -1360,6 +1402,7 @@ class MainActivity : Activity(), LocationListener {
         }
         drawRoadBumps()
         raiseWaypointLayers()
+        if (navigating || demo) updateRouteProgress(if(demo) demoPosition else navigator?.locate(gps ?: p.points.first())?.metres ?: 0.0)
     }
     /**
      * OSM is an optional enhancement; missing data or network errors never claim the
@@ -2146,8 +2189,10 @@ class MainActivity : Activity(), LocationListener {
     }
     private fun showDrivingControls(show: Boolean) {
         controlsVisible = show
-        searchRow.visibility = if (navigating || demo) View.GONE else View.VISIBLE
-        toolsRow.visibility = if (navigating || demo) { if (show) View.VISIBLE else View.GONE } else View.VISIBLE
+        val state = NavigationUiPolicy.state(navigating, demo, show, plan != null)
+        searchRow.visibility = if (state.showSearch) View.VISIBLE else View.GONE
+        // Edit, import and export are never offered while the phone is navigating.
+        toolsRow.visibility = if (!navigating && !demo) View.VISIBLE else View.GONE
         updateDestinationIndicator()
     }
 
