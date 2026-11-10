@@ -40,6 +40,22 @@ class TrafficCalmingTest {
         assertEquals("manual_a",matched.single().raw.id)
     }
 
+    @Test fun parseOverpassNodesForMappedBumpsOnly() {
+        val json = """{"elements":[
+          {"type":"node","id":12,"lat":-43.25,"lon":-65.31,
+            "tags":{"traffic_calming":"table"}},
+          {"type":"node","id":13,"lat":-43.25,"lon":-65.30,
+            "tags":{"hazard":"bump"}},
+          {"type":"node","id":14,"lat":-43.25,"lon":-65.29,
+            "tags":{"name":"nearby street"}}
+        ]}"""
+        val found=TrafficCalming.readOverpassJson(json)
+        assertEquals(2,found.size)
+        assertEquals("table",found[0].kind)
+        assertEquals("bump",found[1].kind)
+        assertTrue(found.all { it.source == BumpSource.OSM })
+    }
+
     @Test fun noCandidatesCannotInventHazards() {
         assertTrue(TrafficCalming.onRoute(route,emptyList()).isEmpty())
         assertNull(TrafficCalming.upcoming(emptyList(),100.0))
