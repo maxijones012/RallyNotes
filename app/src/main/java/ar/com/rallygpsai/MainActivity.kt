@@ -364,7 +364,8 @@ class MainActivity : Activity(), LocationListener {
         searchButton.text = tr("search")
         voiceButton.text = if (voiceOn) tr("voice_on") else tr("voice_off")
         pointsButton.text = tr("points")
-        settingsButton.text = tr("settings")
+        settingsButton.contentDescription = tr("settings")
+        settingsButton.tooltipText = tr("settings")
         historyButton.contentDescription = tr("history")
         recceButton.contentDescription = tr("recce")
         recceButton.text = tr("recce_short")
@@ -651,7 +652,12 @@ class MainActivity : Activity(), LocationListener {
             add(historyButton, 0, dp(46),1f)
             add(button("GPX ↓").apply { textSize=10f;setOnClickListener { importGpx() } }, 0,dp(46),1f)
             add(button("GPX ↑").apply { textSize=10f;setOnClickListener { exportGpx() } }, 0,dp(46),1f)
-            settingsButton = button(tr("settings")).apply { textSize=10f;setOnClickListener { showSettings() } }
+            settingsButton = button("⚙").apply {
+                textSize=21f
+                contentDescription=tr("settings")
+                tooltipText=tr("settings")
+                setOnClickListener { showSettings() }
+            }
             add(settingsButton,0,dp(46),1f)
         }
         bottom.addView(toolsRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
@@ -1501,7 +1507,7 @@ class MainActivity : Activity(), LocationListener {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(12), dp(8), dp(12), dp(12))
         }
-        val intro = label("Seleccioná tu vehículo para el mapa GPS y la DEMO.", 13f, muted)
+        val intro = label("Elegí el vehículo que vas a ver en el mapa.", 13f, muted)
         content.addView(intro, LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(10) })
         lateinit var dialog: android.app.AlertDialog
         var lastGroup = ""
@@ -1512,7 +1518,7 @@ class MainActivity : Activity(), LocationListener {
                     LinearLayout.LayoutParams(-1,dp(32)))
                 lastGroup = groupName
             }
-            for (rowModels in chunk.value.chunked(3)) {
+            for (rowModels in chunk.value.chunked(2)) {
                 val vehicleRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
                 for (model in rowModels) {
                     val active = model.id == selectedBefore
@@ -1531,14 +1537,20 @@ class MainActivity : Activity(), LocationListener {
                         setImageBitmap(RallyVehicles.preview(model.id))
                         contentDescription = model.name + ", vista superior"
                     }
-                    tile.addView(image, LinearLayout.LayoutParams(dp(60), dp(76)))
+                    tile.addView(image, LinearLayout.LayoutParams(dp(88), dp(106)))
                     val text = label(model.name, 11f, white, true).apply {
                         gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
                         textAlignment = View.TEXT_ALIGNMENT_CENTER
                         maxLines = 2
                         ellipsize = android.text.TextUtils.TruncateAt.END
                     }
-                    tile.addView(text, LinearLayout.LayoutParams(-1, dp(39)).apply { topMargin=dp(3) })
+                    tile.addView(text, LinearLayout.LayoutParams(-1, dp(42)).apply { topMargin=dp(3) })
+                    val chosen = label(if(active) "✓ SELECCIONADO" else "TOCAR PARA ELEGIR",
+                        9f, if(active) "#69E7C4" else muted, true).apply {
+                        gravity = Gravity.CENTER
+                        textAlignment = View.TEXT_ALIGNMENT_CENTER
+                    }
+                    tile.addView(chosen, LinearLayout.LayoutParams(-1,dp(23)))
                     tile.setOnClickListener {
                         prefs.edit()
                             .putString(RallyVehicles.KEY, model.id)
@@ -1548,18 +1560,18 @@ class MainActivity : Activity(), LocationListener {
                         status("Vehículo GPS: " + model.name, false)
                         dialog.dismiss()
                     }
-                    vehicleRow.addView(tile, LinearLayout.LayoutParams(0,dp(136),1f).apply {
+                    vehicleRow.addView(tile, LinearLayout.LayoutParams(0,dp(198),1f).apply {
                         marginStart=dp(3); marginEnd=dp(3); bottomMargin=dp(7)
                     })
                 }
-                repeat(3 - rowModels.size) {
-                    vehicleRow.addView(View(this), LinearLayout.LayoutParams(0,dp(136),1f))
+                repeat(2 - rowModels.size) {
+                    vehicleRow.addView(View(this), LinearLayout.LayoutParams(0,dp(198),1f))
                 }
                 content.addView(vehicleRow,LinearLayout.LayoutParams(-1,-2))
             }
         }
         scroll.addView(content)
-        dialog = android.app.AlertDialog.Builder(this).setTitle("ELEGIR VEHÍCULO GPS")
+        dialog = android.app.AlertDialog.Builder(this).setTitle("VEHÍCULOS · RALLY GPS")
             .setView(scroll)
             .setNegativeButton("CERRAR",null)
             .create()
