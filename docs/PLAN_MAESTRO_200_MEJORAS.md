@@ -1,8 +1,8 @@
 # Rally GPS AI — Plan maestro de 200 pasos
 
-Base: v0.3.0. Rama de trabajo: `feature/v031-ux-vehicle-destination-reductores`.
+Base actual: **v0.3.2**. Rama de entrega: `feature/v032-complete-roadmap-ux-safety-tests`.
 
-**Estado actualizado:** 121 pasos con código aplicado o revisión técnica realizada; 79 pendientes de implementación, validación visual o pruebas reales. El tilde de una revisión no reemplaza una prueba en el Motorola.
+**Estado actualizado:** 168 de 200 tareas con implementación, revisión de código o prueba JVM documentada; 32 pendientes de evidencias, pruebas en dispositivo, cobertura adicional o ajustes finales. Algunas verificaciones de integración siguen sujetas al Motorola. Un tilde no significa que la prueba en la calle esté aprobada.
 
 **Criterio:** las tareas restantes no se dan por realizadas. Los pasos con dependencia de servicios externos o validación real quedan pendientes hasta probarlos. No se deben publicar Releases sin tests.
 
@@ -20,13 +20,13 @@ Base: v0.3.0. Rama de trabajo: `feature/v031-ux-vehicle-destination-reductores`.
 - [x] 010. Auditar estados GPS y DEMO
 - [x] 011. Identificar rutas calculadas y GPX
 - [x] 012. Verificar persistencia de opciones
-- [ ] 013. Revisar la lógica de permisos GPS
+- [x] 013. Revisar la lógica de permisos GPS
 - [x] 014. Verificar control de errores de red
 - [x] 015. Localizar puntos de actualización de notas
 - [x] 016. Analizar cola de voz durante curvas
 - [x] 017. Comprobar dibujos sobre modo oscuro
-- [ ] 018. Revisar accesibilidad y tamaños táctiles
-- [ ] 019. Establecer pruebas de regresión
+- [x] 018. Revisar accesibilidad y tamaños táctiles
+- [x] 019. Establecer pruebas de regresión
 - [x] 020. Documentar riesgos y límites de datos
 
 ## Etapa 2 — Interfaz de navegación limpia
@@ -36,21 +36,21 @@ Base: v0.3.0. Rama de trabajo: `feature/v031-ux-vehicle-destination-reductores`.
 - [x] 023. Restablecer búsqueda al finalizar
 - [x] 024. Eliminar cartel verde persistente
 - [x] 025. No repetir nombres de destino
-- [ ] 026. Quitar ayudas redundantes del mapa
+- [x] 026. Quitar ayudas redundantes del mapa
 - [x] 027. Conservar errores críticos visibles
-- [ ] 028. Mostrar solo controles necesarios en marcha
+- [x] 028. Mostrar solo controles necesarios en marcha
 - [ ] 029. Evitar desplazamientos bruscos del panel
-- [ ] 030. Permitir ver mapa sin panel de edición
+- [x] 030. Permitir ver mapa sin panel de edición
 - [ ] 031. Reducir márgenes superiores innecesarios
-- [ ] 032. Separar modo planificación de conducción
+- [x] 032. Separar modo planificación de conducción
 - [ ] 033. Revisar tipografía de distancias
 - [ ] 034. Uniformar colores de acciones
 - [ ] 035. Mantener indicador discreto de GPS
 - [x] 036. Reorganizar opciones del pie
 - [x] 037. Evitar palabras partidas en botones
-- [ ] 038. Conservar acceso al menú al parar
+- [x] 038. Conservar acceso al menú al parar
 - [x] 039. Hacer la limpieza reversible
-- [ ] 040. Probar estados con y sin ruta
+- [x] 040. Probar estados con y sin ruta
 
 ## Etapa 3 — Pin de origen, destino y paradas
 
@@ -61,10 +61,10 @@ Base: v0.3.0. Rama de trabajo: `feature/v031-ux-vehicle-destination-reductores`.
 - [x] 045. Dibujar marcador sobre la línea de ruta
 - [x] 046. Aumentar tamaño al seleccionar
 - [x] 047. Mantener pin al terminar de calcular
-- [ ] 048. Mantener pin después de recálculo
+- [x] 048. Mantener pin después de recálculo
 - [x] 049. Restaurar pin al abrir una ruta guardada
 - [x] 050. Eliminar pin al borrar su punto
-- [ ] 051. Mostrar distancia opcional al destino
+- [x] 051. Mostrar distancia opcional al destino
 - [x] 052. Confirmar selección con feedback breve
 - [x] 053. Respetar coordenadas longitud/latitud
 - [x] 054. Evitar pin duplicado en cambios rápidos
@@ -105,9 +105,9 @@ Base: v0.3.0. Rama de trabajo: `feature/v031-ux-vehicle-destination-reductores`.
 - [x] 083. Verificar respuesta de OSRM
 - [x] 084. Rechazar geometrías inválidas
 - [x] 085. Advertir rutas dudosas
-- [ ] 086. Respetar sentido del trazado
+- [x] 086. Respetar sentido del trazado
 - [ ] 087. No dibujar conexiones imposibles
-- [ ] 088. Resaltar tramo activo
+- [x] 088. Resaltar tramo activo
 - [x] 089. Simplificar visualmente tramos completados
 - [x] 090. Mantener destino visible
 - [x] 091. Conservar origen al planificar
@@ -115,11 +115,11 @@ Base: v0.3.0. Rama de trabajo: `feature/v031-ux-vehicle-destination-reductores`.
 - [x] 093. Evitar tapas de marcador por líneas
 - [x] 094. Recalcular ante desvíos validados
 - [x] 095. No recalcular por salto de GPS
-- [ ] 096. Mantener paradas aún pendientes
+- [x] 096. Mantener paradas aún pendientes
 - [ ] 097. Restaurar cámara de primera persona
-- [ ] 098. Alternar 2D y 3D sin perder marcadores
-- [ ] 099. Mantener zoom adaptable
-- [ ] 100. Revisar modos satélite y oscuro
+- [x] 098. Alternar 2D y 3D sin perder marcadores
+- [x] 099. Mantener zoom adaptable
+- [x] 100. Revisar modos satélite y oscuro
 
 ## Etapa 6 — Reductores y obstáculos confirmados
 
@@ -146,10 +146,10 @@ Base: v0.3.0. Rama de trabajo: `feature/v031-ux-vehicle-destination-reductores`.
 
 ## Etapa 7 — Notas, voz y anticipaciones
 
-- [ ] 121. Conservar notas 1 a 6
-- [ ] 122. Mantener actual, siguiente y tercera
+- [x] 121. Conservar notas 1 a 6
+- [x] 122. Mantener actual, siguiente y tercera
 - [x] 123. Verificar transición al pasar curva
-- [ ] 124. Evitar notas repetidas
+- [x] 124. Evitar notas repetidas
 - [x] 125. Mantener voz de 800 metros
 - [x] 126. Mantener cuenta 3-2-1 GO
 - [x] 127. Integrar anuncio opcional de reductor
@@ -158,52 +158,52 @@ Base: v0.3.0. Rama de trabajo: `feature/v031-ux-vehicle-destination-reductores`.
 - [x] 130. No mezclar grabaciones de idiomas
 - [x] 131. Ajustar frecuencia del copiloto contextual
 - [x] 132. Evitar dos mensajes simultáneos
-- [ ] 133. Respetar pausa de DEMO
-- [ ] 134. Revisar frases de curva larga
-- [ ] 135. Revisar enlace de curvas
-- [ ] 136. Conservar nota estimada visible
-- [ ] 137. Evitar órdenes de velocidad insegura
+- [x] 133. Respetar pausa de DEMO
+- [x] 134. Revisar frases de curva larga
+- [x] 135. Revisar enlace de curvas
+- [x] 136. Conservar nota estimada visible
+- [x] 137. Evitar órdenes de velocidad insegura
 - [ ] 138. Comprobar claridad de voz en parlantes
-- [ ] 139. Agregar prueba de previsualización
-- [ ] 140. Probar simulación de múltiples curvas
+- [x] 139. Agregar prueba de previsualización
+- [x] 140. Probar simulación de múltiples curvas
 
 ## Etapa 8 — Ajustes, accesibilidad y usabilidad
 
 - [x] 141. Ordenar ajustes por categorías
 - [x] 142. Usar iconos comprensibles
 - [x] 143. Agregar accesibilidad a botones
-- [ ] 144. Aumentar áreas táctiles
+- [x] 144. Aumentar áreas táctiles
 - [x] 145. Respetar escalado de fuentes
 - [x] 146. Evitar texto cortado en español
-- [ ] 147. Revisar textos en inglés
-- [ ] 148. Revisar textos en portugués
+- [x] 147. Revisar textos en inglés
+- [x] 148. Revisar textos en portugués
 - [x] 149. Conservar preferencias al actualizar
-- [ ] 150. Agregar explicación breve solo si ayuda
-- [ ] 151. Evitar popups repetitivos
-- [ ] 152. Permitir corregir destino antes de navegar
+- [x] 150. Agregar explicación breve solo si ayuda
+- [x] 151. Evitar popups repetitivos
+- [x] 152. Permitir corregir destino antes de navegar
 - [x] 153. Restringir edición con el auto en movimiento
-- [ ] 154. Conservar modo compacto
-- [ ] 155. Conservar panel de notas grande
+- [x] 154. Conservar modo compacto
+- [x] 155. Conservar panel de notas grande
 - [x] 156. Mostrar estados sin consumir mapa
 - [ ] 157. Revisar orientación horizontal
-- [ ] 158. Revisar modo nocturno
+- [x] 158. Revisar modo nocturno
 - [ ] 159. Probar TalkBack
 - [x] 160. Revisar idioma inicial
 
 ## Etapa 9 — Pruebas y rendimiento
 
 - [ ] 161. Crear pruebas de pin visible
-- [ ] 162. Crear pruebas de persistencia de destino
-- [ ] 163. Probar estados de barra de búsqueda
-- [ ] 164. Probar límites de vehículo seleccionado
+- [x] 162. Crear pruebas de persistencia de destino
+- [x] 163. Probar estados de barra de búsqueda
+- [x] 164. Probar límites de vehículo seleccionado
 - [ ] 165. Probar mapa cargado sin ruta
 - [ ] 166. Probar mapa cargado con ruta
-- [ ] 167. Probar cambio de estilo de mapa
-- [ ] 168. Crear pruebas del parser OSM
+- [x] 167. Probar cambio de estilo de mapa
+- [x] 168. Crear pruebas del parser OSM
 - [x] 169. Probar matching de reductores
 - [x] 170. Probar filtros de distancias
 - [x] 171. Probar deduplicación
-- [ ] 172. Probar rechazo de GPS impreciso
+- [x] 172. Probar rechazo de GPS impreciso
 - [x] 173. Probar aviso de reductor y curva próxima
 - [x] 174. Probar silencio de avisos
 - [ ] 175. Probar pérdida de internet
@@ -216,14 +216,14 @@ Base: v0.3.0. Rama de trabajo: `feature/v031-ux-vehicle-destination-reductores`.
 ## Etapa 10 — Publicación y mantenimiento
 
 - [x] 181. Actualizar número de versión
-- [ ] 182. Escribir changelog de la versión
+- [x] 182. Escribir changelog de la versión
 - [x] 183. Documentar fuentes OSM y atribución
-- [ ] 184. Documentar límites de API pública
+- [x] 184. Documentar límites de API pública
 - [x] 185. Explicar reductores no detectados
 - [x] 186. Documentar flujo de marcación
 - [x] 187. Documentar opciones de vehículos
 - [ ] 188. Comprobar firma de APK
-- [ ] 189. Resguardar compatibilidad de datos
+- [x] 189. Resguardar compatibilidad de datos
 - [x] 190. Preparar rama de integración
 - [x] 191. Crear Pull Request para revisión
 - [x] 192. Verificar GitHub Actions
@@ -232,6 +232,6 @@ Base: v0.3.0. Rama de trabajo: `feature/v031-ux-vehicle-destination-reductores`.
 - [ ] 195. Conservar Release anterior disponible
 - [ ] 196. Publicar prerelease solo al aprobar
 - [ ] 197. Comprobar enlace permanente de APK
-- [ ] 198. Definir prueba segura en Motorola
+- [x] 198. Definir prueba segura en Motorola
 - [ ] 199. Recoger observaciones de la versión
-- [ ] 200. Cerrar tareas y dejar pendientes visibles
+- [x] 200. Cerrar tareas y dejar pendientes visibles
