@@ -174,6 +174,11 @@ class MainActivity : Activity(), LocationListener {
                 drawLocation()
             }
             loaded.addOnMapLongClickListener { latlng ->
+                if (navigating || demo) {
+                    // No destination or road edits while driving.
+                    Toast.makeText(this, "Finalizá el recorrido antes de editar el mapa", Toast.LENGTH_SHORT).show()
+                    true
+                } else {
                 val point = GeoPoint(latlng.latitude, latlng.longitude)
                 when (mapSelectMode) {
                     1 -> { chosenOrigin = point; status("Origen elegido manualmente", false) }
@@ -198,6 +203,7 @@ class MainActivity : Activity(), LocationListener {
                 destinationTapArmed = false
                 drawWaypoints()
                 true
+                }
             }
             loaded.addOnMapClickListener { position ->
                 if (recceMapSelection && !navigating && !demo) {
@@ -918,7 +924,9 @@ class MainActivity : Activity(), LocationListener {
         val parsed = correctedRoute(sourcePlan)
         navigationSession++
         reroutePolicy.reset()
-        routeDestination = parsed.points.lastOrNull()
+        // A GPX is not necessarily a drivable road; OSRM destinations are assigned
+        // only after the server verifies the route.
+        routeDestination = null
         pendingStops = emptyList()
         updateDestinationIndicator()
         if (save) prefs.edit().remove("last_road_destination").remove("last_road_stops").apply()
@@ -1495,7 +1503,9 @@ class MainActivity : Activity(), LocationListener {
         }
         val origin = chosenOrigin ?: plan?.points?.firstOrNull()
         origin?.let { marker(it, "ORIGEN", "origin") }
-        (target ?: routeDestination)?.let { marker(it, "DESTINO", "destination") }
+        (target ?: routeDestination ?: plan?.points?.lastOrNull())?.let {
+            marker(it, "DESTINO", "destination")
+        }
         intermediatePoints.forEachIndexed { index, p -> marker(p, "PARADA ${index+1}", "stop") }
         val features = FeatureCollection.fromFeatures(markers)
         val source = style.getSourceAs<GeoJsonSource>("rally_waypoints")
@@ -1770,22 +1780,29 @@ class MainActivity : Activity(), LocationListener {
     }
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode==900 && grantResults.any{it==PackageManager.PERMISSION_GRANTED}) requestGps()
+        if (requestCode==900) {
+            if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+                requestGps()
+            } else {
+                status("Para notas de rally y velocidad necesitás ubicación precisa", true)
+            }
+        }
         else if (requestCode==900) status("Podés usar GPX y DEMO sin permiso GPS",true)
     }
     override fun onLocationChanged(location: Location) {
-        if (location.hasAccuracy() && location.accuracy > 65f) {
-            if (navigating) status("Señal GPS débil: esperando precisión", true)
+        val ageMs = (android.os.SystemClock.elapsedRealtimeNanos() -
+            location.elapsedRealtimeNanos) / 1_000_000L
+        val accuracy = if (location.hasAccuracy()) location.accuracy else null
+        if (!GpsFixPolicy.usable(location.latitude,location.longitude,accuracy,ageMs)) {
+            if (navigating) status("GPS poco preciso: esperando señal confiable", true)
             return
         }
-        val ageNs = android.os.SystemClock.elapsedRealtimeNanos() - location.elapsedRealtimeNanos
-        if (ageNs > 15_000_000_000L || ageNs < -2_000_000_000L) return
+        val speed = GpsFixPolicy.safeSpeed(location.speed,location.hasSpeed())
         gps = GeoPoint(location.latitude,location.longitude); lastLocation=location
         if (navigating) {
-            realTripRecorder?.accept(gps!!, location.speed,
-                if (location.hasAccuracy()) location.accuracy else 100f,
+            realTripRecorder?.accept(gps!!,speed,accuracy ?: 100f,
                 SystemClock.elapsedRealtime())
-            updateProgress(gps!!, location.speed)
+            updateProgress(gps!!, speed)
         }
         if (!demo) drawPosition(gps!!)
         if (firstGpsCamera) { firstGpsCamera=false; if (!navigating) centerGps() }
