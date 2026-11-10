@@ -27,7 +27,8 @@ object TrafficCalming {
             val lat = obj.optDouble("lat", Double.NaN)
             val lon = obj.optDouble("lon", Double.NaN)
             val tags = obj.optJSONObject("tags") ?: continue
-            val kind = normalize(tags.optString("traffic_calming")) ?: continue
+            val kind = normalize(tags.optString("traffic_calming")) ?: if (tags.optString("hazard") == "bump") "bump" else null
+            ?: continue
             if (!lat.isFinite() || !lon.isFinite() ||
                 lat !in -90.0..90.0 || lon !in -180.0..180.0) continue
             results.add(RawBump("osm_" + obj.optLong("id",i.toLong()),
@@ -96,7 +97,7 @@ object OSMTrafficCalmingService {
         val east = plan.points.maxOf { it.longitude } + 0.002
         if ((north-south)*(east-west) > 0.03 || north-south > 0.20 || east-west > 0.20) return emptyList()
         val bbox = listOf(south,west,north,east).joinToString(",") { "%.6f".format(java.util.Locale.US,it) }
-        val q = "[out:json][timeout:12];node[traffic_calming~\"^(bump|hump|table|cushion|rumble_strip|mini_bumps)$\"]($bbox);out body;"
+        val q = "[out:json][timeout:12];(node[traffic_calming~\"^(bump|hump|table|cushion|rumble_strip|mini_bumps)$\"]($bbox);node[hazard=bump]($bbox););out body;"
         val url = URL("https://overpass.private.coffee/api/interpreter")
         val con = url.openConnection() as HttpURLConnection
         con.requestMethod="POST"
