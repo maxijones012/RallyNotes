@@ -55,6 +55,15 @@ object RallyLanguage {
         "previous" to "ANTERIOR", "following" to "SIGUIENTE", "listen" to "ESCUCHAR",
         "save" to "GUARDAR", "restore" to "RESTABLECER", "position" to "POSICIÓN",
         "grade" to "DIFICULTAD", "modifiers" to "MODIFICADORES", "check_route" to "REVISAR RUTA",
+        "map_style" to "Estilo del mapa",
+        "map_dark" to "Noche · oscuro",
+        "map_day" to "Día · calles claras",
+        "manual_bump" to "Agregar reductor manual",
+        "clear_bumps" to "Borrar reductores agregados",
+        "moving_lock" to "Finalizá la navegación para editar el mapa",
+        "gpx_import" to "IMPORTAR ↓",
+        "gpx_export" to "EXPORTAR ↑",
+        "mark_destination" to "Marcar destino",
         "route_warning" to "Ruta aproximada: revisá el trazado en el mapa antes de salir"
     )
     private val en = mapOf(
@@ -95,6 +104,15 @@ object RallyLanguage {
         "listen" to "LISTEN", "save" to "SAVE", "restore" to "RESET",
         "position" to "POSITION", "grade" to "GRADE", "modifiers" to "MODIFIERS",
         "check_route" to "REVIEW ROUTE",
+        "map_style" to "Map appearance",
+        "map_dark" to "Night · dark",
+        "map_day" to "Day · light roads",
+        "manual_bump" to "Add manual speed bump",
+        "clear_bumps" to "Clear manual speed bumps",
+        "moving_lock" to "Finish navigation before editing the map",
+        "gpx_import" to "IMPORT ↓",
+        "gpx_export" to "EXPORT ↑",
+        "mark_destination" to "Mark destination",
         "route_warning" to "Approximate route: check the plotted road before starting"
     )
     private val pt = mapOf(
@@ -135,6 +153,15 @@ object RallyLanguage {
         "listen" to "OUVIR", "save" to "SALVAR", "restore" to "RESTAURAR",
         "position" to "POSIÇÃO", "grade" to "GRAU", "modifiers" to "MODIFICADORES",
         "check_route" to "REVISAR ROTA",
+        "map_style" to "Estilo do mapa",
+        "map_dark" to "Noite · escuro",
+        "map_day" to "Dia · ruas claras",
+        "manual_bump" to "Adicionar lombada manual",
+        "clear_bumps" to "Apagar lombadas manuais",
+        "moving_lock" to "Finalize a navegação antes de editar o mapa",
+        "gpx_import" to "IMPORTAR ↓",
+        "gpx_export" to "EXPORTAR ↑",
+        "mark_destination" to "Marcar destino",
         "route_warning" to "Rota aproximada: confira o traçado no mapa antes de sair"
     )
     fun text(code: String, key: String): String = when {
