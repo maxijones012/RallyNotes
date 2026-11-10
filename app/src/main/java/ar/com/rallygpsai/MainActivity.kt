@@ -1479,7 +1479,8 @@ class MainActivity : Activity(), LocationListener {
         for (id in listOf("rally_pin_layer_origin", "rally_pin_layer_stop",
             "rally_pin_layer_destination", "rally_waypoints_labels")) {
             val layer = style.getLayer(id) ?: continue
-            style.removeLayer(id)
+            // MapLibre allows re-adding a Layer only when removed by object, not by ID.
+            style.removeLayer(layer)
             style.addLayer(layer)
         }
     }
