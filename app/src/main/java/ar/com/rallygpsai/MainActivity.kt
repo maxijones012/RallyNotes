@@ -524,7 +524,7 @@ class MainActivity : Activity(), LocationListener {
                 }
             }
         }
-        top.addView(destinationIndicator, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(7) })
+        // Destination is represented by a map pin; no duplicate green banner.
         banner = label(tr("gps"), 11f, muted)
         banner.visibility = View.GONE
         top.addView(banner, LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(8) })
@@ -737,17 +737,10 @@ class MainActivity : Activity(), LocationListener {
     }
 
     private fun updateDestinationIndicator(summary: String? = null, approximate: Boolean? = null) {
-        if (summary != null) chosenDestinationText = summary.take(45).ifBlank { "PUNTO MARCADO" }
+        if (summary != null) chosenDestinationText = summary.take(45)
         if (approximate != null) chosenDestinationApproximate = approximate
-        val point = target ?: routeDestination
-        if (point == null) {
-            destinationIndicator.visibility = View.GONE
-            return
-        }
-        destinationIndicator.visibility = if ((navigating || demo) && !controlsVisible) View.GONE else View.VISIBLE
-        val suffix = if (chosenDestinationApproximate) " · APROXIMADO" else ""
-        destinationIndicator.text = "✓ DESTINO: $chosenDestinationText$suffix  ·  TOCÁ PARA VER"
-        destinationIndicator.setTextColor(Color.parseColor(if (chosenDestinationApproximate) "#FFE49D" else "#ADFFE0"))
+        // Show the actual pin on the map instead of a persistent duplicate label.
+        if (::destinationIndicator.isInitialized) destinationIndicator.visibility = View.GONE
     }
 
     private fun chooseDestination(point: GeoPoint, name: String, approximate: Boolean = false) {
@@ -755,8 +748,8 @@ class MainActivity : Activity(), LocationListener {
         destinationTapArmed = false
         updateDestinationIndicator(name, approximate)
         drawWaypoints()
-        status(if (approximate) "Dirección aproximada: verificá el pin en el mapa"
-            else "Destino confirmado · tocá TRAZAR RUTA", approximate)
+        Toast.makeText(this, if (approximate) "Punto aproximado marcado. Revisalo en el mapa"
+            else "Destino señalado en el mapa", Toast.LENGTH_SHORT).show()
     }
 
     private fun status(message: String, error: Boolean) {
@@ -886,7 +879,7 @@ class MainActivity : Activity(), LocationListener {
         val parsed = correctedRoute(sourcePlan)
         navigationSession++
         reroutePolicy.reset()
-        routeDestination = null
+        routeDestination = parsed.points.lastOrNull()
         pendingStops = emptyList()
         updateDestinationIndicator()
         if (save) prefs.edit().remove("last_road_destination").remove("last_road_stops").apply()
@@ -1334,34 +1327,54 @@ class MainActivity : Activity(), LocationListener {
                 circleStrokeColor("#FFFFFF"), circleStrokeWidth(3f)))
             updateVehicleLayers()
         }
+        raiseWaypointLayers()
     }
+    /** High contrast map pins, visible above route strokes and labels. */
     private fun drawWaypoints() {
         val style = map?.style ?: return
         val markers = mutableListOf<Feature>()
-        fun pointMarker(point: GeoPoint, name: String, tone: String) {
-            markers.add(Feature.fromGeometry(Point.fromLngLat(point.longitude,point.latitude)).apply {
-                addStringProperty("label", name)
-                addStringProperty("tone", tone)
+        fun marker(point: GeoPoint, label: String, kind: String) {
+            if (!point.latitude.isFinite() || !point.longitude.isFinite()) return
+            markers.add(Feature.fromGeometry(Point.fromLngLat(point.longitude, point.latitude)).apply {
+                addStringProperty("label", label)
+                addStringProperty("kind", kind)
             })
         }
-        chosenOrigin?.let { pointMarker(it,"ORIGEN","#46C8EA") }
-        // A calculated road route retains the destination pin after target is cleared.
-        (target ?: routeDestination)?.let { pointMarker(it,"DESTINO","#43D9A6") }
-        intermediatePoints.forEachIndexed { index,p ->
-            pointMarker(p,"VÍA ${index+1}","#F3D14A")
-        }
-        val collection = FeatureCollection.fromFeatures(markers)
+        val origin = chosenOrigin ?: plan?.points?.firstOrNull()
+        origin?.let { marker(it, "ORIGEN", "origin") }
+        (target ?: routeDestination)?.let { marker(it, "DESTINO", "destination") }
+        intermediatePoints.forEachIndexed { index, p -> marker(p, "PARADA ${index+1}", "stop") }
+        val features = FeatureCollection.fromFeatures(markers)
         val source = style.getSourceAs<GeoJsonSource>("rally_waypoints")
         if (source == null) {
-            style.addSource(GeoJsonSource("rally_waypoints",collection))
-            style.addLayer(CircleLayer("rally_waypoints_circles","rally_waypoints").withProperties(
-                circleColor(Expression.get("tone")), circleRadius(8f),
-                circleStrokeColor("#FFFFFF"), circleStrokeWidth(2f)))
-            style.addLayer(SymbolLayer("rally_waypoints_labels","rally_waypoints").withProperties(
+            style.addSource(GeoJsonSource("rally_waypoints", features))
+            for (kind in WaypointArtwork.Kind.values()) {
+                style.addImage("rally_pin_" + kind.id, WaypointArtwork.bitmap(kind))
+                val symbol = SymbolLayer("rally_pin_layer_" + kind.id, "rally_waypoints")
+                    .withProperties(
+                        iconImage("rally_pin_" + kind.id), iconSize(0.74f),
+                        iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_VIEWPORT),
+                        iconAnchor(Property.ICON_ANCHOR_BOTTOM),
+                        iconAllowOverlap(true), iconIgnorePlacement(true))
+                symbol.setFilter(Expression.eq(Expression.get("kind"), Expression.literal(kind.id)))
+                style.addLayer(symbol)
+            }
+            style.addLayer(SymbolLayer("rally_waypoints_labels", "rally_waypoints").withProperties(
                 textField(Expression.get("label")), textSize(12f), textColor("#FFFFFF"),
-                textHaloColor("#111827"), textHaloWidth(2f),
-                textOffset(arrayOf(0f,-1.8f))))
-        } else source.setGeoJson(collection)
+                textHaloColor("#101827"), textHaloWidth(2.5f), textAllowOverlap(true),
+                textOffset(arrayOf(0f, 0.8f))))
+        } else source.setGeoJson(features)
+        raiseWaypointLayers()
+    }
+
+    private fun raiseWaypointLayers() {
+        val style = map?.style ?: return
+        for (id in listOf("rally_pin_layer_origin", "rally_pin_layer_stop",
+            "rally_pin_layer_destination", "rally_waypoints_labels")) {
+            val layer = style.getLayer(id) ?: continue
+            style.removeLayer(id)
+            style.addLayer(layer)
+        }
     }
 
     /**
@@ -2001,7 +2014,7 @@ class MainActivity : Activity(), LocationListener {
     }
     private fun showDrivingControls(show: Boolean) {
         controlsVisible = show
-        searchRow.visibility = if (navigating || demo) { if (show) View.VISIBLE else View.GONE } else View.VISIBLE
+        searchRow.visibility = if (navigating || demo) View.GONE else View.VISIBLE
         toolsRow.visibility = if (navigating || demo) { if (show) View.VISIBLE else View.GONE } else View.VISIBLE
         updateDestinationIndicator()
     }
