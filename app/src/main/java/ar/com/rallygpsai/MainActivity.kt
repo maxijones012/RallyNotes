@@ -1479,12 +1479,16 @@ class MainActivity : Activity(), LocationListener {
             else "REGISTRADO EN OSM"
         bumpBanner.text = "⚠ REDUCTOR · $distanceText  ·  $sourceLabel"
         bumpBanner.visibility = View.VISIBLE
-        val canSpeak = voiceOn && speakReady && speedMps >= 2.0 &&
-            distance in 45.0..160.0 && !priorityNote && distanceToNote >= 250.0 &&
-            (lastPriorityNoteAtMs < 0 || nowMs-lastPriorityNoteAtMs >= 15_000L) &&
-            tts?.isSpeaking != true && !rallyAudio.isBusy() && !reroutePolicy.isBusy()
+        val elapsed = if (lastPriorityNoteAtMs < 0) 30_000L else nowMs-lastPriorityNoteAtMs
+        val busy = tts?.isSpeaking == true || rallyAudio.isBusy() || reroutePolicy.isBusy()
+        val canSpeak = voiceOn && speakReady &&
+            RallySafetySpeech.mayAlert(distance,speedMps,distanceToNote,priorityNote,busy,elapsed)
         if (canSpeak && announcedBumps.add(upcoming.raw.id)) {
-            say("Atención, ${TrafficCalming.voiceName(upcoming.raw.kind)} registrado en el mapa")
+            say(when {
+                appLanguage.startsWith("en") -> "Caution, mapped traffic calming ahead. Confirm visually."
+                appLanguage.startsWith("pt") -> "Atenção, redutor sinalizado no mapa. Confira visualmente."
+                else -> "Atención, ${TrafficCalming.voiceName(upcoming.raw.kind)} señalado en el mapa. Verificá visualmente."
+            })
         }
     }
 
