@@ -61,7 +61,7 @@ class MainActivity : Activity(), LocationListener {
     private var target: GeoPoint? = null
     private var chosenOrigin: GeoPoint? = null
     private val intermediatePoints = mutableListOf<GeoPoint>()
-    private var mapSelectMode = 0 // 0 destino, 1 origen, 2 parada
+    private var mapSelectMode = 0 // 0 destino, 1 origen, 2 parada, 3 reductor manual
     private var destinationTapArmed = false // activado sólo desde PUNTOS → señalar destino
     private var chosenDestinationText = "PUNTO MARCADO"
     private var chosenDestinationApproximate = false
@@ -90,6 +90,11 @@ class MainActivity : Activity(), LocationListener {
     private var lastNoteDistanceM = 0.0
     private var lastRemainingMetres = 0.0
     private val contextualCopilot = ContextCopilot()
+    private val manualBumpStore by lazy { ManualTrafficCalmingStore(this) }
+    private var roadBumps = emptyList<RouteBump>()
+    private val announcedBumps = mutableSetOf<String>()
+    private var bumpLookupSession = 0L
+    private lateinit var bumpBanner: TextView
     private var lastPriorityNoteAtMs = -1L
     private var contextualCommentIndex = 0
     private var firstGpsCamera = true
@@ -164,12 +169,20 @@ class MainActivity : Activity(), LocationListener {
             loaded.setStyle(Style.Builder().fromUri("https://tiles.openfreemap.org/styles/dark")) {
                 drawPlan()
                 drawWaypoints()
+                drawRoadBumps()
                 drawLocation()
             }
             loaded.addOnMapLongClickListener { latlng ->
                 val point = GeoPoint(latlng.latitude, latlng.longitude)
                 when (mapSelectMode) {
                     1 -> { chosenOrigin = point; status("Origen elegido manualmente", false) }
+                    3 -> {
+                        if (!navigating && !demo) {
+                            manualBumpStore.add(point)
+                            Toast.makeText(this, "Reductor guardado en este teléfono", Toast.LENGTH_SHORT).show()
+                            refreshRoadBumps()
+                        }
+                    }
                     2 -> {
                         if (intermediatePoints.size < 4) {
                             intermediatePoints.add(point)
@@ -178,7 +191,6 @@ class MainActivity : Activity(), LocationListener {
                     }
                     else -> {
                         chooseDestination(point, "PUNTO DEL MAPA")
-                        Toast.makeText(this, "✓ Destino elegido", Toast.LENGTH_SHORT).show()
                     }
                 }
                 mapSelectMode = 0
@@ -364,7 +376,8 @@ class MainActivity : Activity(), LocationListener {
         searchButton.text = tr("search")
         voiceButton.text = if (voiceOn) tr("voice_on") else tr("voice_off")
         pointsButton.text = tr("points")
-        settingsButton.text = tr("settings")
+        settingsButton.contentDescription = tr("settings")
+        settingsButton.tooltipText = tr("settings")
         historyButton.contentDescription = tr("history")
         recceButton.contentDescription = tr("recce")
         recceButton.text = tr("recce_short")
@@ -524,7 +537,7 @@ class MainActivity : Activity(), LocationListener {
                 }
             }
         }
-        top.addView(destinationIndicator, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(7) })
+        // Destination is represented by a map pin; no duplicate green banner.
         banner = label(tr("gps"), 11f, muted)
         banner.visibility = View.GONE
         top.addView(banner, LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(8) })
@@ -605,6 +618,13 @@ class MainActivity : Activity(), LocationListener {
             addView(noteContent, LinearLayout.LayoutParams(0, -2, 1f))
         }
         top.addView(noteCard, LinearLayout.LayoutParams(-1,-2).apply { topMargin = dp(10) })
+        bumpBanner = label("", 12f, "#241900", true).apply {
+            visibility = View.GONE
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12),dp(8),dp(12),dp(8))
+            background = shape("#F9C95E", 10, "#FFDE83")
+        }
+        top.addView(bumpBanner, LinearLayout.LayoutParams(-1,-2).apply { topMargin = dp(7) })
         resetNoteCard(sky, "RALLY GPS AI", tr("dest"), tr("dest_sub"))
 
         root.addView(top, FrameLayout.LayoutParams(-1,-2,Gravity.TOP).apply {
@@ -651,7 +671,12 @@ class MainActivity : Activity(), LocationListener {
             add(historyButton, 0, dp(46),1f)
             add(button("GPX ↓").apply { textSize=10f;setOnClickListener { importGpx() } }, 0,dp(46),1f)
             add(button("GPX ↑").apply { textSize=10f;setOnClickListener { exportGpx() } }, 0,dp(46),1f)
-            settingsButton = button(tr("settings")).apply { textSize=10f;setOnClickListener { showSettings() } }
+            settingsButton = button("⚙").apply {
+                textSize=21f
+                contentDescription=tr("settings")
+                tooltipText=tr("settings")
+                setOnClickListener { showSettings() }
+            }
             add(settingsButton,0,dp(46),1f)
         }
         bottom.addView(toolsRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
@@ -737,17 +762,10 @@ class MainActivity : Activity(), LocationListener {
     }
 
     private fun updateDestinationIndicator(summary: String? = null, approximate: Boolean? = null) {
-        if (summary != null) chosenDestinationText = summary.take(45).ifBlank { "PUNTO MARCADO" }
+        if (summary != null) chosenDestinationText = summary.take(45)
         if (approximate != null) chosenDestinationApproximate = approximate
-        val point = target ?: routeDestination
-        if (point == null) {
-            destinationIndicator.visibility = View.GONE
-            return
-        }
-        destinationIndicator.visibility = if ((navigating || demo) && !controlsVisible) View.GONE else View.VISIBLE
-        val suffix = if (chosenDestinationApproximate) " · APROXIMADO" else ""
-        destinationIndicator.text = "✓ DESTINO: $chosenDestinationText$suffix  ·  TOCÁ PARA VER"
-        destinationIndicator.setTextColor(Color.parseColor(if (chosenDestinationApproximate) "#FFE49D" else "#ADFFE0"))
+        // Show the actual pin on the map instead of a persistent duplicate label.
+        if (::destinationIndicator.isInitialized) destinationIndicator.visibility = View.GONE
     }
 
     private fun chooseDestination(point: GeoPoint, name: String, approximate: Boolean = false) {
@@ -755,8 +773,8 @@ class MainActivity : Activity(), LocationListener {
         destinationTapArmed = false
         updateDestinationIndicator(name, approximate)
         drawWaypoints()
-        status(if (approximate) "Dirección aproximada: verificá el pin en el mapa"
-            else "Destino confirmado · tocá TRAZAR RUTA", approximate)
+        Toast.makeText(this, if (approximate) "Punto aproximado marcado. Revisalo en el mapa"
+            else "Destino señalado en el mapa", Toast.LENGTH_SHORT).show()
     }
 
     private fun status(message: String, error: Boolean) {
@@ -820,6 +838,7 @@ class MainActivity : Activity(), LocationListener {
             navigating = false; demo = false; tts?.stop(); rallyAudio.stop(); lastSpoken = -1
             contextualCopilot.reset(); lastPriorityNoteAtMs = -1L
             showDrivingControls(true)
+            bumpBanner.visibility = View.GONE
             action.text = tr("go"); nextButton.text = "DEMO"
             resetNoteCard("#F0475A", "STOP", "NAVEGACIÓN DETENIDA", "Podés retomar el recorrido o trazar uno nuevo")
             status(if (plan != null) "Recorrido finalizado. Revisá el historial para ver las estadísticas." else "Navegación detenida", false)
@@ -886,7 +905,7 @@ class MainActivity : Activity(), LocationListener {
         val parsed = correctedRoute(sourcePlan)
         navigationSession++
         reroutePolicy.reset()
-        routeDestination = null
+        routeDestination = parsed.points.lastOrNull()
         pendingStops = emptyList()
         updateDestinationIndicator()
         if (save) prefs.edit().remove("last_road_destination").remove("last_road_stops").apply()
@@ -902,6 +921,7 @@ class MainActivity : Activity(), LocationListener {
         lastRemainingMetres = parsed.totalMetres
         tripDistance.text = "$km km " + tr("remaining")
         drawPlan()
+        refreshRoadBumps()
         if (save && parsed.points.size <= 30000) prefs.edit().putString("last_route", RouteStore.serialize(parsed.points)).apply()
         val center = parsed.points[parsed.points.size/2]
         map?.animateCamera(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder()
@@ -1050,6 +1070,8 @@ class MainActivity : Activity(), LocationListener {
             val follow = route.notes.getOrNull(result.noteIndex+1)
             updateNoteCard(next, follow, result.distanceToNoteM)
         }
+        updateRoadBumpWarning(result.fix.metres, result.distanceToNoteM, speed.toDouble(),
+            result.announcement != null, now)
         if (result.announcement != null) lastPriorityNoteAtMs = now
         result.announcement?.let { message ->
             if (result.noteIndex >= 0 && !result.arrived) {
@@ -1083,6 +1105,7 @@ class MainActivity : Activity(), LocationListener {
             contextualCopilot.reset()
             reroutePolicy.reset()
             navigating = false; demo = false; action.text = tr("go")
+            bumpBanner.visibility = View.GONE
             showDrivingControls(true)
         }
     }
@@ -1120,6 +1143,7 @@ class MainActivity : Activity(), LocationListener {
                             .putString("last_route", RouteStore.serialize(updated.points))
                             .putString("last_road_stops", RouteStore.serialize(stopsAhead)).apply()
                         drawPlan()
+                        refreshRoadBumps()
                         updateProgress(current, lastLocation?.speed ?: 0f)
                         status("Nueva ruta calculada · notas actualizadas", false)
                         say("Ruta recalculada. Nuevas notas disponibles.")
@@ -1334,34 +1358,134 @@ class MainActivity : Activity(), LocationListener {
                 circleStrokeColor("#FFFFFF"), circleStrokeWidth(3f)))
             updateVehicleLayers()
         }
+        drawRoadBumps()
+        raiseWaypointLayers()
     }
+    /**
+     * OSM is an optional enhancement; missing data or network errors never claim the
+     * road is obstacle-free. One lookup per newly prepared/recalculated route only.
+     */
+    private fun refreshRoadBumps() {
+        val route = plan
+        val session = ++bumpLookupSession
+        roadBumps = emptyList()
+        announcedBumps.clear()
+        if (::bumpBanner.isInitialized) bumpBanner.visibility = View.GONE
+        if (route == null) { drawRoadBumps(); return }
+        roadBumps = TrafficCalming.onRoute(route, manualBumpStore.list())
+        drawRoadBumps()
+        thread {
+            val osm = runCatching { OSMTrafficCalmingService.fetchFor(route) }
+                .getOrElse { emptyList() }
+            val complete = TrafficCalming.onRoute(route, osm + manualBumpStore.list())
+            runOnUiThread {
+                if (session == bumpLookupSession && plan === route && !isFinishing && !isDestroyed) {
+                    roadBumps = complete
+                    drawRoadBumps()
+                }
+            }
+        }
+    }
+
+    private fun drawRoadBumps() {
+        val style = map?.style ?: return
+        val visible = if (plan == null)
+            manualBumpStore.list()
+        else roadBumps.map { it.raw }
+        val features = visible.map { bump ->
+            Feature.fromGeometry(Point.fromLngLat(bump.point.longitude,bump.point.latitude))
+                .apply {
+                    addStringProperty("label", if (bump.source == BumpSource.MANUAL) "M" else "R")
+                    addStringProperty("kind", bump.kind)
+                }
+        }
+        val collection = FeatureCollection.fromFeatures(features)
+        val source = style.getSourceAs<GeoJsonSource>("rally_traffic_calming")
+        if (source == null) {
+            style.addSource(GeoJsonSource("rally_traffic_calming",collection))
+            style.addLayer(CircleLayer("rally_traffic_calming_dots","rally_traffic_calming").withProperties(
+                circleColor("#FFC44D"), circleRadius(13f),
+                circleStrokeColor("#171921"), circleStrokeWidth(3f)))
+            style.addLayer(SymbolLayer("rally_traffic_calming_labels","rally_traffic_calming")
+                .withProperties(textField(Expression.get("label")), textSize(13f),
+                    textColor("#191B26"), textAllowOverlap(true)))
+        } else source.setGeoJson(collection)
+    }
+
+    private fun updateRoadBumpWarning(
+        progressMetres: Double, distanceToNote: Double, speedMps: Double,
+        priorityNote: Boolean, nowMs: Long
+    ) {
+        if (!::bumpBanner.isInitialized) return
+        val upcoming = TrafficCalming.upcoming(roadBumps, progressMetres)
+        if (upcoming == null) { bumpBanner.visibility = View.GONE; return }
+        val distance = upcoming.routeMetres-progressMetres
+        if (distance < -8.0 || distance > 200.0) {
+            bumpBanner.visibility = View.GONE
+            return
+        }
+        val distanceText = if (distance <= 16.0) "AHORA" else
+            "${((distance/10.0).roundToInt()*10).coerceAtLeast(10)} m"
+        val sourceLabel = if(upcoming.raw.source==BumpSource.MANUAL) "AGREGADO POR VOS"
+            else "REGISTRADO EN OSM"
+        bumpBanner.text = "⚠ REDUCTOR · $distanceText  ·  $sourceLabel"
+        bumpBanner.visibility = View.VISIBLE
+        val canSpeak = voiceOn && speakReady && speedMps >= 2.0 &&
+            distance in 45.0..160.0 && !priorityNote && distanceToNote >= 250.0 &&
+            (lastPriorityNoteAtMs < 0 || nowMs-lastPriorityNoteAtMs >= 15_000L) &&
+            tts?.isSpeaking != true && !rallyAudio.isBusy() && !reroutePolicy.isBusy()
+        if (canSpeak && announcedBumps.add(upcoming.raw.id)) {
+            say("Atención, ${TrafficCalming.voiceName(upcoming.raw.kind)} registrado en el mapa")
+        }
+    }
+
+    /** High contrast map pins, visible above route strokes and labels. */
     private fun drawWaypoints() {
         val style = map?.style ?: return
         val markers = mutableListOf<Feature>()
-        fun pointMarker(point: GeoPoint, name: String, tone: String) {
-            markers.add(Feature.fromGeometry(Point.fromLngLat(point.longitude,point.latitude)).apply {
-                addStringProperty("label", name)
-                addStringProperty("tone", tone)
+        fun marker(point: GeoPoint, label: String, kind: String) {
+            if (!point.latitude.isFinite() || !point.longitude.isFinite()) return
+            markers.add(Feature.fromGeometry(Point.fromLngLat(point.longitude, point.latitude)).apply {
+                addStringProperty("label", label)
+                addStringProperty("kind", kind)
             })
         }
-        chosenOrigin?.let { pointMarker(it,"ORIGEN","#46C8EA") }
-        // A calculated road route retains the destination pin after target is cleared.
-        (target ?: routeDestination)?.let { pointMarker(it,"DESTINO","#43D9A6") }
-        intermediatePoints.forEachIndexed { index,p ->
-            pointMarker(p,"VÍA ${index+1}","#F3D14A")
-        }
-        val collection = FeatureCollection.fromFeatures(markers)
+        val origin = chosenOrigin ?: plan?.points?.firstOrNull()
+        origin?.let { marker(it, "ORIGEN", "origin") }
+        (target ?: routeDestination)?.let { marker(it, "DESTINO", "destination") }
+        intermediatePoints.forEachIndexed { index, p -> marker(p, "PARADA ${index+1}", "stop") }
+        val features = FeatureCollection.fromFeatures(markers)
         val source = style.getSourceAs<GeoJsonSource>("rally_waypoints")
         if (source == null) {
-            style.addSource(GeoJsonSource("rally_waypoints",collection))
-            style.addLayer(CircleLayer("rally_waypoints_circles","rally_waypoints").withProperties(
-                circleColor(Expression.get("tone")), circleRadius(8f),
-                circleStrokeColor("#FFFFFF"), circleStrokeWidth(2f)))
-            style.addLayer(SymbolLayer("rally_waypoints_labels","rally_waypoints").withProperties(
+            style.addSource(GeoJsonSource("rally_waypoints", features))
+            for (kind in WaypointArtwork.Kind.values()) {
+                style.addImage("rally_pin_" + kind.id, WaypointArtwork.bitmap(kind))
+                val symbol = SymbolLayer("rally_pin_layer_" + kind.id, "rally_waypoints")
+                    .withProperties(
+                        iconImage("rally_pin_" + kind.id), iconSize(0.74f),
+                        iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_VIEWPORT),
+                        iconAnchor(Property.ICON_ANCHOR_BOTTOM),
+                        iconAllowOverlap(true), iconIgnorePlacement(true))
+                symbol.setFilter(Expression.eq(Expression.get("kind"), Expression.literal(kind.id)))
+                style.addLayer(symbol)
+            }
+            style.addLayer(SymbolLayer("rally_waypoints_labels", "rally_waypoints").withProperties(
                 textField(Expression.get("label")), textSize(12f), textColor("#FFFFFF"),
-                textHaloColor("#111827"), textHaloWidth(2f),
-                textOffset(arrayOf(0f,-1.8f))))
-        } else source.setGeoJson(collection)
+                textHaloColor("#101827"), textHaloWidth(2.5f), textAllowOverlap(true),
+                textOffset(arrayOf(0f, 0.8f))))
+        } else source.setGeoJson(features)
+        raiseWaypointLayers()
+    }
+
+    private fun raiseWaypointLayers() {
+        val style = map?.style ?: return
+        for (id in listOf("rally_pin_layer_origin", "rally_pin_layer_stop",
+            "rally_pin_layer_destination", "rally_waypoints_labels")) {
+            val layer = style.getLayer(id) ?: continue
+            // MapLibre allows re-adding a Layer only when removed by object, not by ID.
+            style.removeLayer(layer)
+            style.addLayer(layer)
+        }
     }
 
     /**
@@ -1488,7 +1612,7 @@ class MainActivity : Activity(), LocationListener {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(12), dp(8), dp(12), dp(12))
         }
-        val intro = label("Seleccioná tu vehículo para el mapa GPS y la DEMO.", 13f, muted)
+        val intro = label("Elegí el vehículo que vas a ver en el mapa.", 13f, muted)
         content.addView(intro, LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(10) })
         lateinit var dialog: android.app.AlertDialog
         var lastGroup = ""
@@ -1499,7 +1623,7 @@ class MainActivity : Activity(), LocationListener {
                     LinearLayout.LayoutParams(-1,dp(32)))
                 lastGroup = groupName
             }
-            for (rowModels in chunk.value.chunked(3)) {
+            for (rowModels in chunk.value.chunked(2)) {
                 val vehicleRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
                 for (model in rowModels) {
                     val active = model.id == selectedBefore
@@ -1518,14 +1642,20 @@ class MainActivity : Activity(), LocationListener {
                         setImageBitmap(RallyVehicles.preview(model.id))
                         contentDescription = model.name + ", vista superior"
                     }
-                    tile.addView(image, LinearLayout.LayoutParams(dp(60), dp(76)))
+                    tile.addView(image, LinearLayout.LayoutParams(dp(88), dp(106)))
                     val text = label(model.name, 11f, white, true).apply {
                         gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
                         textAlignment = View.TEXT_ALIGNMENT_CENTER
                         maxLines = 2
                         ellipsize = android.text.TextUtils.TruncateAt.END
                     }
-                    tile.addView(text, LinearLayout.LayoutParams(-1, dp(39)).apply { topMargin=dp(3) })
+                    tile.addView(text, LinearLayout.LayoutParams(-1, dp(42)).apply { topMargin=dp(3) })
+                    val chosen = label(if(active) "✓ SELECCIONADO" else "TOCAR PARA ELEGIR",
+                        9f, if(active) "#69E7C4" else muted, true).apply {
+                        gravity = Gravity.CENTER
+                        textAlignment = View.TEXT_ALIGNMENT_CENTER
+                    }
+                    tile.addView(chosen, LinearLayout.LayoutParams(-1,dp(23)))
                     tile.setOnClickListener {
                         prefs.edit()
                             .putString(RallyVehicles.KEY, model.id)
@@ -1535,18 +1665,18 @@ class MainActivity : Activity(), LocationListener {
                         status("Vehículo GPS: " + model.name, false)
                         dialog.dismiss()
                     }
-                    vehicleRow.addView(tile, LinearLayout.LayoutParams(0,dp(136),1f).apply {
+                    vehicleRow.addView(tile, LinearLayout.LayoutParams(0,dp(198),1f).apply {
                         marginStart=dp(3); marginEnd=dp(3); bottomMargin=dp(7)
                     })
                 }
-                repeat(3 - rowModels.size) {
-                    vehicleRow.addView(View(this), LinearLayout.LayoutParams(0,dp(136),1f))
+                repeat(2 - rowModels.size) {
+                    vehicleRow.addView(View(this), LinearLayout.LayoutParams(0,dp(198),1f))
                 }
                 content.addView(vehicleRow,LinearLayout.LayoutParams(-1,-2))
             }
         }
         scroll.addView(content)
-        dialog = android.app.AlertDialog.Builder(this).setTitle("ELEGIR VEHÍCULO GPS")
+        dialog = android.app.AlertDialog.Builder(this).setTitle("VEHÍCULOS · RALLY GPS")
             .setView(scroll)
             .setNegativeButton("CERRAR",null)
             .create()
@@ -1984,7 +2114,8 @@ class MainActivity : Activity(), LocationListener {
 
     private fun showPointOptions() {
         val choices = arrayOf(tr("destination_point"), tr("origin_point"), tr("via_point"),
-            tr("gps_origin"), tr("clear_stops"))
+            tr("gps_origin"), tr("clear_stops"), "Agregar reductor en el mapa",
+            "Borrar reductores manuales")
         android.app.AlertDialog.Builder(this).setTitle(tr("points_title"))
             .setItems(choices) { _, index ->
                 when (index) {
@@ -1996,12 +2127,26 @@ class MainActivity : Activity(), LocationListener {
                     }
                     3 -> { chosenOrigin = null; drawWaypoints(); status("Origen: GPS actual", false) }
                     4 -> { intermediatePoints.clear(); drawWaypoints(); status("Paradas eliminadas", false) }
+                    5 -> {
+                        if (navigating || demo) {
+                            status("Detené la navegación antes de marcar un reductor", true)
+                        } else {
+                            mapSelectMode = 3
+                            Toast.makeText(this, "Mantené pulsado el lugar del reductor",Toast.LENGTH_LONG).show()
+                        }
+                    }
+                    6 -> android.app.AlertDialog.Builder(this)
+                        .setTitle("Borrar reductores agregados")
+                        .setMessage("Se eliminarán solo los reductores marcados por vos. Los de OpenStreetMap no se modifican.")
+                        .setPositiveButton("BORRAR") { _, _ ->
+                            manualBumpStore.clear(); refreshRoadBumps()
+                        }.setNegativeButton("CANCELAR",null).show()
                 }
             }.setNegativeButton("CERRAR",null).show()
     }
     private fun showDrivingControls(show: Boolean) {
         controlsVisible = show
-        searchRow.visibility = if (navigating || demo) { if (show) View.VISIBLE else View.GONE } else View.VISIBLE
+        searchRow.visibility = if (navigating || demo) View.GONE else View.VISIBLE
         toolsRow.visibility = if (navigating || demo) { if (show) View.VISIBLE else View.GONE } else View.VISIBLE
         updateDestinationIndicator()
     }
