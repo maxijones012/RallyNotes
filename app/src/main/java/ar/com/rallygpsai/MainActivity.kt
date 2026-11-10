@@ -70,6 +70,7 @@ class MainActivity : Activity(), LocationListener {
     private lateinit var locationManager: LocationManager
     private var navigating = false
     private var demo = false
+    private var demoPaused = false
     private var routeDestination: GeoPoint? = null
     private var pendingStops = listOf<GeoPoint>()
     private val reroutePolicy = ReroutePolicy()
@@ -171,7 +172,7 @@ class MainActivity : Activity(), LocationListener {
             loaded.uiSettings.isCompassEnabled = true
             installMapStyle(loaded)
             loaded.addOnMapLongClickListener { latlng ->
-                if (navigating || demo) {
+                if (navigating || demo || demoPaused) {
                     // No destination or road edits while driving.
                     Toast.makeText(this, "Finalizá el recorrido antes de editar el mapa", Toast.LENGTH_SHORT).show()
                     true
@@ -203,7 +204,7 @@ class MainActivity : Activity(), LocationListener {
                 }
             }
             loaded.addOnMapClickListener { position ->
-                if (recceMapSelection && !navigating && !demo) {
+                if (recceMapSelection && !navigating && !demo && !demoPaused) {
                     recceMapSelection = false
                     val route = plan
                     val selected = if (route != null) route.notes.indices.minByOrNull { index ->
@@ -223,12 +224,12 @@ class MainActivity : Activity(), LocationListener {
                         else Toast.makeText(this, "No hay una curva a menos de 90 metros", Toast.LENGTH_SHORT).show()
                     }
                     true
-                } else if (destinationTapArmed && !navigating && !demo) {
+                } else if (destinationTapArmed && !navigating && !demo && !demoPaused) {
                     chooseDestination(GeoPoint(position.latitude, position.longitude), "PUNTO DEL MAPA")
                     Toast.makeText(this, "✓ Destino elegido", Toast.LENGTH_SHORT).show()
                     true
                 } else {
-                    if (navigating || demo) showDrivingControls(!controlsVisible)
+                    if (navigating || demo || demoPaused) showDrivingControls(!controlsVisible)
                     false
                 }
             }
@@ -392,6 +393,7 @@ class MainActivity : Activity(), LocationListener {
             else -> tr("route")
         }
         if (demo) nextButton.text = tr("pause")
+        if (demoPaused) nextButton.text = tr("resume")
         tripDistance.text = RallyDistanceFormatter.remaining(lastRemainingMetres) + " " + tr("remaining")
         if (plan == null) resetNoteCard(sky, "RALLY GPS AI", tr("dest"), tr("dest_sub"))
         else {
@@ -848,11 +850,11 @@ class MainActivity : Activity(), LocationListener {
         }
     }
     private fun mainAction() {
-        if (navigating || demo) {
+        if (navigating || demo || demoPaused) {
             finishRealTrip()
             navigationSession++
             reroutePolicy.reset()
-            navigating = false; demo = false; tts?.stop(); rallyAudio.stop(); lastSpoken = -1
+            navigating = false; demo = false; demoPaused = false; tts?.stop(); rallyAudio.stop(); lastSpoken = -1
             contextualCopilot.reset(); lastPriorityNoteAtMs = -1L
             showDrivingControls(true)
             bumpBanner.visibility = View.GONE
@@ -931,7 +933,7 @@ class MainActivity : Activity(), LocationListener {
         plan = parsed; navigator = NavigationEngine(parsed) { warnFactor }; drivingCamera.reset()
         contextualCopilot.reset(); lastPriorityNoteAtMs = -1L
         positionIndex = 0; lastSpoken = -1; currentNote = 0
-        navigating = false; demo = false; demoPosition = 0.0
+        navigating = false; demo = false; demoPaused = false; demoPosition = 0.0
         action.text = tr("go"); nextButton.text = "DEMO"
         showDrivingControls(false)
         val km = "%.1f".format(Locale.US, parsed.totalMetres / 1000.0)
@@ -1017,7 +1019,21 @@ class MainActivity : Activity(), LocationListener {
         }
     }
     private fun startDemo() {
-        if (demo) { demo=false; contextualCopilot.reset(); nextButton.text="DEMO"; action.text=tr("go"); showDrivingControls(true); return }
+        if (demo) {
+            demo = false
+            demoPaused = true
+            nextButton.text = tr("resume")
+            action.text = tr("finish")
+            // Keep the note cursor, route progress and spoken state intact.
+            tts?.stop()
+            rallyAudio.stop()
+            showDrivingControls(false)
+            return
+        }
+        if (demoPaused) {
+            beginDemo(resuming = true)
+            return
+        }
         // Never draw a fabricated road through real city blocks. A DEMO may simulate
         // movement on an already calculated road route or a user-imported GPX only.
         if (!DemoRoutePolicy.canStart(plan)) {
@@ -1036,13 +1052,18 @@ class MainActivity : Activity(), LocationListener {
         startCountdown { beginDemo() }
     }
 
-    private fun beginDemo() {
+    private fun beginDemo(resuming: Boolean = false) {
         if (!DemoRoutePolicy.canStart(plan) || isFinishing || isDestroyed) return
-        navigationSession++
-        reroutePolicy.reset()
-        demo = true; navigating = false; demoPosition = 0.0; positionIndex=0; lastSpoken=-1
-        navigator?.reset(); drivingCamera.reset(); followRouteCamera = true; showDrivingControls(false)
-        contextualCopilot.reset(); lastPriorityNoteAtMs = -1L
+        if (!resuming) {
+            navigationSession++
+            reroutePolicy.reset()
+            demoPosition = 0.0; positionIndex = 0; lastSpoken = -1
+            navigator?.reset(); drivingCamera.reset()
+            contextualCopilot.reset(); lastPriorityNoteAtMs = -1L
+        }
+        demo = true; demoPaused = false; navigating = false
+        followRouteCamera = true
+        showDrivingControls(false)
         action.text = tr("finish"); nextButton.text=tr("pause")
         val tick = object : Runnable {
             override fun run() {
@@ -1054,7 +1075,7 @@ class MainActivity : Activity(), LocationListener {
                 val point = p.points[index]
                 updateProgress(point, demoSpeed.toFloat())
                 drawPosition(point)
-                if (index >= p.points.lastIndex) { demo=false; action.text=tr("go"); nextButton.text="DEMO"; showDrivingControls(true); return }
+                if (index >= p.points.lastIndex) { demo=false; demoPaused=false; action.text=tr("go"); nextButton.text="DEMO"; showDrivingControls(true); return }
                 ui.postDelayed(this, 500)
             }
         }
@@ -1126,7 +1147,7 @@ class MainActivity : Activity(), LocationListener {
             navigationSession++
             contextualCopilot.reset()
             reroutePolicy.reset()
-            navigating = false; demo = false; action.text = tr("go")
+            navigating = false; demo = false; demoPaused = false; action.text = tr("go")
             bumpBanner.visibility = View.GONE
             showDrivingControls(true)
         }
@@ -2243,10 +2264,10 @@ class MainActivity : Activity(), LocationListener {
     }
     private fun showDrivingControls(show: Boolean) {
         controlsVisible = show
-        val state = NavigationUiPolicy.state(navigating, demo, show, plan != null)
+        val state = NavigationUiPolicy.state(navigating, demo || demoPaused, show, plan != null)
         searchRow.visibility = if (state.showSearch) View.VISIBLE else View.GONE
         // Edit, import and export are never offered while the phone is navigating.
-        toolsRow.visibility = if (!navigating && !demo) View.VISIBLE else View.GONE
+        toolsRow.visibility = if (!navigating && !demo && !demoPaused) View.VISIBLE else View.GONE
         updateDestinationIndicator()
     }
 
@@ -2379,7 +2400,7 @@ class MainActivity : Activity(), LocationListener {
         countdownDialog?.dismiss()
         countdownDialog = null
         finishRealTrip()
-        demo=false; navigating=false; ui.removeCallbacksAndMessages(null)
+        demo=false; demoPaused=false; navigating=false; ui.removeCallbacksAndMessages(null)
         locationManager.removeUpdates(this)
         rallyAudio.stop()
         tts?.stop();tts?.shutdown()
