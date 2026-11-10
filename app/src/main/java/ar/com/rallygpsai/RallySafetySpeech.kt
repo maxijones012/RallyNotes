@@ -7,6 +7,6 @@ object RallySafetySpeech {
         priorityNote: Boolean, audioBusy: Boolean, timeSincePriorityMs: Long
     ): Boolean = distanceM.isFinite() && distanceM in 45.0..160.0 &&
         speedMps.isFinite() && speedMps >= 2.0 &&
-        bendDistanceM.isFinite() && bendDistanceM >= 250.0 &&
+        !bendDistanceM.isNaN() && bendDistanceM >= 250.0 &&
         !priorityNote && !audioBusy && timeSincePriorityMs >= 15_000L
 }
