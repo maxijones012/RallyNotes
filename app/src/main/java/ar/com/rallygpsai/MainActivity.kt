@@ -1359,8 +1359,84 @@ class MainActivity : Activity(), LocationListener {
                 circleStrokeColor("#FFFFFF"), circleStrokeWidth(3f)))
             updateVehicleLayers()
         }
+        drawRoadBumps()
         raiseWaypointLayers()
     }
+    /**
+     * OSM is an optional enhancement; missing data or network errors never claim the
+     * road is obstacle-free. One lookup per newly prepared/recalculated route only.
+     */
+    private fun refreshRoadBumps() {
+        val route = plan
+        val session = ++bumpLookupSession
+        roadBumps = emptyList()
+        announcedBumps.clear()
+        if (::bumpBanner.isInitialized) bumpBanner.visibility = View.GONE
+        if (route == null) { drawRoadBumps(); return }
+        roadBumps = TrafficCalming.onRoute(route, manualBumpStore.list())
+        drawRoadBumps()
+        thread {
+            val osm = runCatching { OSMTrafficCalmingService.fetchFor(route) }
+                .getOrElse { emptyList() }
+            val complete = TrafficCalming.onRoute(route, osm + manualBumpStore.list())
+            runOnUiThread {
+                if (session == bumpLookupSession && plan === route && !isFinishing && !isDestroyed) {
+                    roadBumps = complete
+                    drawRoadBumps()
+                }
+            }
+        }
+    }
+
+    private fun drawRoadBumps() {
+        val style = map?.style ?: return
+        val features = roadBumps.map { bump ->
+            Feature.fromGeometry(Point.fromLngLat(bump.raw.point.longitude,bump.raw.point.latitude))
+                .apply {
+                    addStringProperty("label", "R")
+                    addStringProperty("kind", bump.raw.kind)
+                }
+        }
+        val collection = FeatureCollection.fromFeatures(features)
+        val source = style.getSourceAs<GeoJsonSource>("rally_traffic_calming")
+        if (source == null) {
+            style.addSource(GeoJsonSource("rally_traffic_calming",collection))
+            style.addLayer(CircleLayer("rally_traffic_calming_dots","rally_traffic_calming").withProperties(
+                circleColor("#FFC44D"), circleRadius(13f),
+                circleStrokeColor("#171921"), circleStrokeWidth(3f)))
+            style.addLayer(SymbolLayer("rally_traffic_calming_labels","rally_traffic_calming")
+                .withProperties(textField(Expression.get("label")), textSize(13f),
+                    textColor("#191B26"), textAllowOverlap(true)))
+        } else source.setGeoJson(collection)
+    }
+
+    private fun updateRoadBumpWarning(
+        progressMetres: Double, distanceToNote: Double, speedMps: Double,
+        priorityNote: Boolean, nowMs: Long
+    ) {
+        if (!::bumpBanner.isInitialized) return
+        val upcoming = TrafficCalming.upcoming(roadBumps, progressMetres)
+        if (upcoming == null) { bumpBanner.visibility = View.GONE; return }
+        val distance = upcoming.routeMetres-progressMetres
+        if (distance < -8.0 || distance > 200.0) {
+            bumpBanner.visibility = View.GONE
+            return
+        }
+        val distanceText = if (distance <= 16.0) "AHORA" else
+            "${((distance/10.0).roundToInt()*10).coerceAtLeast(10)} m"
+        val sourceLabel = if(upcoming.raw.source==BumpSource.MANUAL) "AGREGADO POR VOS"
+            else "REGISTRADO EN OSM"
+        bumpBanner.text = "⚠ REDUCTOR · $distanceText  ·  $sourceLabel"
+        bumpBanner.visibility = View.VISIBLE
+        val canSpeak = voiceOn && speakReady && speedMps >= 2.0 &&
+            distance in 45.0..160.0 && !priorityNote && distanceToNote >= 250.0 &&
+            (lastPriorityNoteAtMs < 0 || nowMs-lastPriorityNoteAtMs >= 15_000L) &&
+            tts?.isSpeaking != true && !rallyAudio.isBusy() && !reroutePolicy.isBusy()
+        if (canSpeak && announcedBumps.add(upcoming.raw.id)) {
+            say("Atención, ${TrafficCalming.voiceName(upcoming.raw.kind)} registrado en el mapa")
+        }
+    }
+
     /** High contrast map pins, visible above route strokes and labels. */
     private fun drawWaypoints() {
         val style = map?.style ?: return
