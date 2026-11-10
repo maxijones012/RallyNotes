@@ -136,11 +136,31 @@ object RallyVehicles {
         rounded(44f, 25f, 56f, 43f, 3f, accent)
         rounded(47f, 27f, 53f, 42f, 2f, Color.argb(100, 255, 255, 255))
 
+        // Side mirrors, door seams and a stronger silhouette distinguish body types.
+        rounded(side - 4f, 48f, side + 4f, 61f, 3f, outline)
+        rounded(96f - side, 48f, 104f - side, 61f, 3f, outline)
+        rounded(side + 2f, 68f, side + 5f, 113f, 2f, darken(bodyColour, 0.28f))
+        rounded(95f - side, 68f, 98f - side, 113f, 2f, darken(bodyColour, 0.28f))
+        if (model.body == Body.SUV || model.body == Body.OFFROAD) {
+            // Roof rails and reinforced corners, more readable at GPS scale.
+            rounded(side + 5, 63f, side + 9, 113f, 2f, outline)
+            rounded(91f - side, 63f, 95f - side, 113f, 2f, outline)
+        }
         // Dark angled windscreen, roof and rear window.
         rounded(side + 6, 46f, 94f - side, 64f, 5f, outline)
         rounded(side + 9, 48f, 91f - side, 61f, 4f, glass)
         rounded(side + 11, 48f, 91f - side, 50f, 1.5f, reflect)
         rounded(side + 8, 65f, 92f - side, cabinEnd - 5f, 6f, darken(bodyColour, 0.09f))
+        // Roof gloss and clearly model-specific sports details.
+        rounded(side + 14, 69f, side + 17, cabinEnd - 11f, 2f,
+            Color.argb(125, 255, 255, 255))
+        if (model.number > 0 || model.body == Body.RALLY) {
+            rounded(43f, 28f, 57f, 36f, 3f, outline)
+            rounded(46f, 29f, 54f, 34f, 2f, darken(bodyColour, 0.45f))
+        }
+        if (model.body == Body.OFFROAD) {
+            rounded(side + 6, 112f, 94f - side, 117f, 3f, Color.argb(130, 20, 20, 20))
+        }
 
         if (isPickup) {
             // Pickup-specific open cargo bed separated from cabin.
