@@ -1389,11 +1389,14 @@ class MainActivity : Activity(), LocationListener {
 
     private fun drawRoadBumps() {
         val style = map?.style ?: return
-        val features = roadBumps.map { bump ->
-            Feature.fromGeometry(Point.fromLngLat(bump.raw.point.longitude,bump.raw.point.latitude))
+        val visible = if (plan == null)
+            manualBumpStore.list()
+        else roadBumps.map { it.raw }
+        val features = visible.map { bump ->
+            Feature.fromGeometry(Point.fromLngLat(bump.point.longitude,bump.point.latitude))
                 .apply {
-                    addStringProperty("label", "R")
-                    addStringProperty("kind", bump.raw.kind)
+                    addStringProperty("label", if (bump.source == BumpSource.MANUAL) "M" else "R")
+                    addStringProperty("kind", bump.kind)
                 }
         }
         val collection = FeatureCollection.fromFeatures(features)
