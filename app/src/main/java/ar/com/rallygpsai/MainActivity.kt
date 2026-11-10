@@ -191,7 +191,6 @@ class MainActivity : Activity(), LocationListener {
                     }
                     else -> {
                         chooseDestination(point, "PUNTO DEL MAPA")
-                        Toast.makeText(this, "✓ Destino elegido", Toast.LENGTH_SHORT).show()
                     }
                 }
                 mapSelectMode = 0
