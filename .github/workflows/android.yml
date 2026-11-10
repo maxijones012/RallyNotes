@@ -59,15 +59,19 @@ jobs:
           VERSION=v0.3.1
           cp app/build/outputs/apk/debug/app-debug.apk "Rally_GPS_AI_${VERSION}.apk"
           cat > release_notes.txt <<'EOF'
-          Rally GPS AI 0.3.0 (versión de prueba para Android)
+          Rally GPS AI 0.3.1 — mejoras de mapa y vehículos (versión de prueba)
 
-          - RECONOCIMIENTO: revisar curvas en lista y sobre el mapa, escuchar notas y avanzar entre ellas.
-          - Editor de notas: ajustar izquierda/derecha, grado 1–6, punto de aviso, larga, abre y cierra.
-          - Correcciones guardadas localmente por ruta; no modifican ni crean calles.
-          - Ruteo OSRM: verificar geometría, posiciones ajustadas a calles y distancias.
-          - Las rutas dudosas requieren confirmación; un recálculo inválido conserva el trazado anterior.
-          - Mantiene notas encadenadas, modo compacto, 3-2-1-GO, historial y estadísticas GPS reales.
-          - Mantiene Subaru, selección de vehículos, idiomas, voces CarlFM y copiloto contextual.
+          - Pines visibles para origen, destino y paradas, con símbolos contrastados.
+          - Buscador oculto durante GPS/DEMO y sin cartel verde duplicado de destino.
+          - Galería de vehículos de dos columnas con miniaturas y nombres más grandes.
+          - Ajustes accesibles mediante un engranaje.
+          - Reductores desde puntos OSM traffic_calming/hazard=bump cercanos al trazado,
+            y opción para marcarlos manualmente desde PUNTOS.
+          - Avisos visuales y audio opcional sin interrumpir curvas prioritarias.
+          - Un reductor ausente de OSM no se puede detectar automáticamente.
+          - Se mantienen notas, modos GPS/DEMO, historial, GPX y voces CarlFM.
+          - Plan de 200 pasos: docs/PLAN_MAESTRO_200_MEJORAS.md.
+            Persisten tareas de validación visual y seguridad en el teléfono.
 
           APK de prueba (debug): podés instalarla manualmente en Android. Algunas actualizaciones pueden exigir desinstalar la versión anterior si la firma es diferente. Respaldá tus GPX primero.
           Las notas derivadas del mapa son aproximadas y no sustituyen la señalización ni la conducción segura.
