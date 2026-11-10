@@ -71,6 +71,7 @@ class MainActivity : Activity(), LocationListener {
     private var navigating = false
     private var demo = false
     private var demoPaused = false
+    private var demoTickGeneration = 0L
     private var routeDestination: GeoPoint? = null
     private var pendingStops = listOf<GeoPoint>()
     private val reroutePolicy = ReroutePolicy()
@@ -854,7 +855,7 @@ class MainActivity : Activity(), LocationListener {
             finishRealTrip()
             navigationSession++
             reroutePolicy.reset()
-            navigating = false; demo = false; demoPaused = false; tts?.stop(); rallyAudio.stop(); lastSpoken = -1
+            navigating = false; demo = false; demoPaused = false; ++demoTickGeneration; tts?.stop(); rallyAudio.stop(); lastSpoken = -1
             contextualCopilot.reset(); lastPriorityNoteAtMs = -1L
             showDrivingControls(true)
             bumpBanner.visibility = View.GONE
@@ -933,7 +934,7 @@ class MainActivity : Activity(), LocationListener {
         plan = parsed; navigator = NavigationEngine(parsed) { warnFactor }; drivingCamera.reset()
         contextualCopilot.reset(); lastPriorityNoteAtMs = -1L
         positionIndex = 0; lastSpoken = -1; currentNote = 0
-        navigating = false; demo = false; demoPaused = false; demoPosition = 0.0
+        navigating = false; demo = false; demoPaused = false; ++demoTickGeneration; demoPosition = 0.0
         action.text = tr("go"); nextButton.text = "DEMO"
         showDrivingControls(false)
         val km = "%.1f".format(Locale.US, parsed.totalMetres / 1000.0)
@@ -1021,6 +1022,7 @@ class MainActivity : Activity(), LocationListener {
     private fun startDemo() {
         if (demo) {
             demo = false
+            ++demoTickGeneration
             demoPaused = true
             nextButton.text = tr("resume")
             action.text = tr("finish")
@@ -1065,17 +1067,24 @@ class MainActivity : Activity(), LocationListener {
         followRouteCamera = true
         showDrivingControls(false)
         action.text = tr("finish"); nextButton.text=tr("pause")
+        val tickVersion = ++demoTickGeneration
         val tick = object : Runnable {
             override fun run() {
-                if (!demo) return
+                if (!demo || tickVersion != demoTickGeneration) return
                 val p = plan ?: return
-                demoPosition += demoSpeed * 0.5
-                val index = p.metresAtPoint.indexOfFirst { it >= demoPosition }.let { if (it<0) p.points.lastIndex else it }
-                positionIndex = index
-                val point = p.points[index]
+                demoPosition = (demoPosition + demoSpeed * 0.5).coerceAtMost(p.totalMetres)
+                val point = DrivingCamera.pointAt(p, demoPosition)
+                positionIndex = p.metresAtPoint.binarySearch(demoPosition).let { found ->
+                    (if(found < 0) -found-2 else found).coerceIn(0, p.points.lastIndex-1)
+                }
                 updateProgress(point, demoSpeed.toFloat())
                 drawPosition(point)
-                if (index >= p.points.lastIndex) { demo=false; demoPaused=false; action.text=tr("go"); nextButton.text="DEMO"; showDrivingControls(true); return }
+                if (demoPosition >= p.totalMetres - 0.5) {
+                    demo=false; demoPaused=false; ++demoTickGeneration
+                    action.text=tr("go"); nextButton.text="DEMO"
+                    showDrivingControls(true)
+                    return
+                }
                 ui.postDelayed(this, 500)
             }
         }
@@ -2400,7 +2409,7 @@ class MainActivity : Activity(), LocationListener {
         countdownDialog?.dismiss()
         countdownDialog = null
         finishRealTrip()
-        demo=false; demoPaused=false; navigating=false; ui.removeCallbacksAndMessages(null)
+        demo=false; demoPaused=false; ++demoTickGeneration; navigating=false; ui.removeCallbacksAndMessages(null)
         locationManager.removeUpdates(this)
         rallyAudio.stop()
         tts?.stop();tts?.shutdown()
