@@ -1579,8 +1579,8 @@ class MainActivity : Activity(), LocationListener {
      */
     private fun carBearing(point: GeoPoint): Float {
         val route = plan
-        if ((navigating || demo) && route != null && route.points.size >= 2) {
-            val metres = if (demo) demoPosition else navigator?.locate(point)?.metres ?: 0.0
+        if ((navigating || demo || demoPaused) && route != null && route.points.size >= 2) {
+            val metres = if (demo || demoPaused) demoPosition else navigator?.locate(point)?.metres ?: 0.0
             val a = DrivingCamera.pointAt(route, (metres - 4.0).coerceAtLeast(0.0))
             val b = DrivingCamera.pointAt(route, (metres + 20.0).coerceAtMost(route.totalMetres))
             if (DrivingCamera.distance(a,b) >= 1.0) return DrivingCamera.bearing(a,b).toFloat()
@@ -1643,7 +1643,7 @@ class MainActivity : Activity(), LocationListener {
                     "xl" -> if (selected == RallyVehicles.DEFAULT) 3.7f else 3.0f
                     else -> if (selected == RallyVehicles.DEFAULT) 2.85f else 2.35f
                 }
-                val bearing = (if (demo) plan?.points?.getOrNull(positionIndex) else gps)
+                val bearing = (if (demo || demoPaused) plan?.points?.getOrNull(positionIndex) else gps)
                     ?.let { carBearing(it) } ?: 0f
                 val layer = style.getLayerAs<SymbolLayer>("rally_car_layer")
                 if (layer == null) {
@@ -1806,12 +1806,17 @@ class MainActivity : Activity(), LocationListener {
             (resources.displayMetrics.heightPixels * 0.81f).toInt())
     }
 
-    private fun drawLocation() { gps?.let { drawPosition(it) } }
+    private fun drawLocation() {
+        val current = if (demo || demoPaused) plan?.let {
+            DrivingCamera.pointAt(it,demoPosition)
+        } else gps
+        current?.let { drawPosition(it) }
+    }
     private fun toggle3D() {
         map3d = !map3d
         modeButton.text = if (map3d) "3D" else "2D"
         drivingCamera.reset()
-        val live = if (demo) plan?.points?.getOrNull(positionIndex) else gps
+        val live = if (demo || demoPaused) plan?.points?.getOrNull(positionIndex) else gps
         if ((navigating || demo) && live != null) drawPosition(live)
         else (gps ?: plan?.points?.firstOrNull())?.let { point ->
             map?.animateCamera(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder()
@@ -1820,9 +1825,9 @@ class MainActivity : Activity(), LocationListener {
         }
     }
     private fun centerGps() {
-        if (navigating || demo) {
+        if (navigating || demo || demoPaused) {
             followRouteCamera = true
-            val current = if (demo) plan?.points?.getOrNull(positionIndex) else gps
+            val current = if (demo || demoPaused) plan?.points?.getOrNull(positionIndex) else gps
             current?.let { drawPosition(it) }
             return
         }
@@ -1871,9 +1876,9 @@ class MainActivity : Activity(), LocationListener {
                 SystemClock.elapsedRealtime())
             updateProgress(gps!!, speed)
         }
-        if (!demo) drawPosition(gps!!)
+        if (!demo && !demoPaused) drawPosition(gps!!)
         if (firstGpsCamera) { firstGpsCamera=false; if (!navigating) centerGps() }
-        if (!navigating && !demo) status("GPS disponible · mantené pulsado el mapa para elegir destino",false)
+        if (!navigating && !demo && !demoPaused) status("GPS disponible · mantené pulsado el mapa para elegir destino",false)
     }
 
     private fun importGpx() {
