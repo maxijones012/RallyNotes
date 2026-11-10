@@ -76,6 +76,7 @@ class MainActivity : Activity(), LocationListener {
     private var navigationSession = 0L
     private var voiceEngineSettingsOpened = false
     private var map3d = true
+    private var mapVisualStyle = RallyMapStyle.DARK
     private val drivingCamera = DrivingCamera()
     // Avoid uploading image textures to MapLibre on every GPS fix (often 1 Hz).
     private var vehicleImageStyle: Style? = null
@@ -161,18 +162,14 @@ class MainActivity : Activity(), LocationListener {
         appLanguage = RallyLanguage.normalized(prefs.getString(RallyLanguage.KEY, RallyLanguage.defaultFor(Locale.getDefault())))
         voiceOn = prefs.getBoolean("voice", true)
         warnFactor = prefs.getInt("anticipation", 1)
+        mapVisualStyle = RallyMapStyle.fromStored(prefs.getString("map_visual_style", "dark"))
         buildUI()
         mapView.getMapAsync { loaded ->
             map = loaded
             loaded.uiSettings.isAttributionEnabled = true
             loaded.uiSettings.isLogoEnabled = true
             loaded.uiSettings.isCompassEnabled = true
-            loaded.setStyle(Style.Builder().fromUri("https://tiles.openfreemap.org/styles/dark")) {
-                drawPlan()
-                drawWaypoints()
-                drawRoadBumps()
-                drawLocation()
-            }
+            installMapStyle(loaded)
             loaded.addOnMapLongClickListener { latlng ->
                 if (navigating || demo) {
                     // No destination or road edits while driving.
@@ -738,7 +735,8 @@ class MainActivity : Activity(), LocationListener {
     /** Keep the large rally board by default; compact mode frees extra map space. */
     private fun applyNoteViewMode() {
         if (!::primaryNoteTile.isInitialized || !::linkedNoteTile.isInitialized) return
-        val compact = prefs.getBoolean("compact_notes", false)
+        val compact = prefs.getBoolean("compact_notes", false) ||
+            resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
         val p = primaryNoteTile.layoutParams as? LinearLayout.LayoutParams
         p?.width = dp(if (compact) 56 else 78)
         p?.height = dp(if (compact) 56 else 78)
@@ -1641,6 +1639,40 @@ class MainActivity : Activity(), LocationListener {
             visibility(if (activeCar) Property.NONE else Property.VISIBLE))
     }
 
+    private fun installMapStyle(current: MapLibreMap = map ?: return) {
+        vehicleImageStyle = null
+        vehicleImageKeys.clear()
+        lastRenderedProgress = -1000.0
+        current.setStyle(Style.Builder().fromUri(mapVisualStyle.url)) {
+            drawPlan()
+            drawWaypoints()
+            drawRoadBumps()
+            drawLocation()
+            raiseWaypointLayers()
+            val route = plan
+            if (route != null && (navigating || demo)) {
+                updateRouteProgress(if (demo) demoPosition else
+                    navigator?.locate(gps ?: route.points.first())?.metres ?: 0.0)
+            }
+        }
+    }
+
+    private fun chooseMapStyle() {
+        if (navigating || demo) {
+            status("Cambiá el diseño del mapa con la navegación detenida", true)
+            return
+        }
+        val available = arrayOf("NOCHE · oscuro", "DÍA · calles claras")
+        android.app.AlertDialog.Builder(this).setTitle("ESTILO DEL MAPA")
+            .setSingleChoiceItems(available, if(mapVisualStyle == RallyMapStyle.DARK) 0 else 1) { dialog, index ->
+                mapVisualStyle = if(index==0) RallyMapStyle.DARK else RallyMapStyle.DAY
+                prefs.edit().putString("map_visual_style",mapVisualStyle.id).apply()
+                installMapStyle()
+                dialog.dismiss()
+            }
+            .setNegativeButton(tr("back"),null).show()
+    }
+
     private fun selectVehicleMarkerSize() {
         val sizes = listOf("normal", "large", "xl")
         val labels = arrayOf(tr("size_normal"), tr("size_large"), tr("size_xl"))
@@ -2256,7 +2288,7 @@ class MainActivity : Activity(), LocationListener {
         val indices: List<Int> = when (section) {
             0 -> listOf(0,1,2,3,4,15)
             1 -> listOf(5,6,13,7,8,9)
-            2 -> listOf(11,14)
+            2 -> listOf(11,14,16)
             else -> listOf(12,10)
         }
         val labelFor: (Int) -> String = { index ->
@@ -2277,6 +2309,7 @@ class MainActivity : Activity(), LocationListener {
                 13 -> tr("context_menu")
                 14 -> tr("vehicle_size")
                 15 -> tr("note_view")
+                16 -> "Estilo del mapa · día/noche"
                 else -> ""
             }
         }
@@ -2320,6 +2353,7 @@ class MainActivity : Activity(), LocationListener {
             13 -> selectContextualMode()
             14 -> selectVehicleMarkerSize()
             15 -> selectNoteViewMode()
+            16 -> chooseMapStyle()
         }
     }
 
