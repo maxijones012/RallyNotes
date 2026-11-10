@@ -19,6 +19,8 @@ import android.media.AudioAttributes
 import android.os.SystemClock
 import android.view.Gravity
 import android.view.View
+import android.view.WindowManager
+import android.view.inputmethod.InputMethodManager
 import android.widget.*
 import org.maplibre.android.MapLibre
 import org.maplibre.android.camera.CameraPosition
@@ -790,6 +792,7 @@ class MainActivity : Activity(), LocationListener {
 
     private fun chooseDestination(point: GeoPoint, name: String, approximate: Boolean = false) {
         target = point
+        hideSearchKeyboard()
         destinationTapArmed = false
         updateDestinationIndicator(name, approximate)
         drawWaypoints()
@@ -855,7 +858,7 @@ class MainActivity : Activity(), LocationListener {
             finishRealTrip()
             navigationSession++
             reroutePolicy.reset()
-            navigating = false; demo = false; demoPaused = false; ++demoTickGeneration; tts?.stop(); rallyAudio.stop(); lastSpoken = -1
+            navigating = false; demo = false; demoPaused = false; ++demoTickGeneration; updateScreenAwake(); tts?.stop(); rallyAudio.stop(); lastSpoken = -1
             contextualCopilot.reset(); lastPriorityNoteAtMs = -1L
             showDrivingControls(true)
             bumpBanner.visibility = View.GONE
@@ -934,7 +937,7 @@ class MainActivity : Activity(), LocationListener {
         plan = parsed; navigator = NavigationEngine(parsed) { warnFactor }; drivingCamera.reset()
         contextualCopilot.reset(); lastPriorityNoteAtMs = -1L
         positionIndex = 0; lastSpoken = -1; currentNote = 0
-        navigating = false; demo = false; demoPaused = false; ++demoTickGeneration; demoPosition = 0.0
+        navigating = false; demo = false; demoPaused = false; ++demoTickGeneration; updateScreenAwake(); demoPosition = 0.0
         action.text = tr("go"); nextButton.text = "DEMO"
         showDrivingControls(false)
         val km = "%.1f".format(Locale.US, parsed.totalMetres / 1000.0)
@@ -997,6 +1000,21 @@ class MainActivity : Activity(), LocationListener {
         advance(0)
     }
 
+    private fun updateScreenAwake() {
+        if (navigating || demo) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+
+    private fun hideSearchKeyboard() {
+        if (!::searchInput.isInitialized) return
+        val manager = getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager
+        manager?.hideSoftInputFromWindow(searchInput.windowToken, 0)
+        searchInput.clearFocus()
+    }
+
     private fun startGpsNavigation() {
         if (plan == null) { status("Primero elegí un recorrido", true); return }
         if (gps == null) { requestGps(); status("Esperando GPS", true); return }
@@ -1008,6 +1026,8 @@ class MainActivity : Activity(), LocationListener {
         navigationSession++
         reroutePolicy.reset()
         navigating = true; demo = false; positionIndex = 0; lastSpoken = -1; currentNote = 0
+        updateScreenAwake()
+        hideSearchKeyboard()
         realTripRecorder = RealTripRecorder(System.currentTimeMillis(), SystemClock.elapsedRealtime(),
             plan?.points.orEmpty())
         navigator?.reset(); drivingCamera.reset(); followRouteCamera = true; showDrivingControls(false)
@@ -1022,6 +1042,7 @@ class MainActivity : Activity(), LocationListener {
     private fun startDemo() {
         if (demo) {
             demo = false
+            updateScreenAwake()
             ++demoTickGeneration
             demoPaused = true
             nextButton.text = tr("resume")
@@ -1064,6 +1085,8 @@ class MainActivity : Activity(), LocationListener {
             contextualCopilot.reset(); lastPriorityNoteAtMs = -1L
         }
         demo = true; demoPaused = false; navigating = false
+        updateScreenAwake()
+        hideSearchKeyboard()
         followRouteCamera = true
         showDrivingControls(false)
         action.text = tr("finish"); nextButton.text=tr("pause")
@@ -1081,6 +1104,7 @@ class MainActivity : Activity(), LocationListener {
                 drawPosition(point)
                 if (demoPosition >= p.totalMetres - 0.5) {
                     demo=false; demoPaused=false; ++demoTickGeneration
+                    updateScreenAwake()
                     action.text=tr("go"); nextButton.text="DEMO"
                     showDrivingControls(true)
                     return
@@ -1156,7 +1180,7 @@ class MainActivity : Activity(), LocationListener {
             navigationSession++
             contextualCopilot.reset()
             reroutePolicy.reset()
-            navigating = false; demo = false; demoPaused = false; action.text = tr("go")
+            navigating = false; demo = false; demoPaused = false; updateScreenAwake(); action.text = tr("go")
             bumpBanner.visibility = View.GONE
             showDrivingControls(true)
         }
@@ -2414,7 +2438,7 @@ class MainActivity : Activity(), LocationListener {
         countdownDialog?.dismiss()
         countdownDialog = null
         finishRealTrip()
-        demo=false; demoPaused=false; ++demoTickGeneration; navigating=false; ui.removeCallbacksAndMessages(null)
+        demo=false; demoPaused=false; ++demoTickGeneration; navigating=false; updateScreenAwake(); ui.removeCallbacksAndMessages(null)
         locationManager.removeUpdates(this)
         rallyAudio.stop()
         tts?.stop();tts?.shutdown()
