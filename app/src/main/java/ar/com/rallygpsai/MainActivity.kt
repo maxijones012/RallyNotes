@@ -19,6 +19,8 @@ import android.media.AudioAttributes
 import android.os.SystemClock
 import android.view.Gravity
 import android.view.View
+import android.view.WindowManager
+import android.view.inputmethod.InputMethodManager
 import android.widget.*
 import org.maplibre.android.MapLibre
 import org.maplibre.android.camera.CameraPosition
@@ -70,17 +72,21 @@ class MainActivity : Activity(), LocationListener {
     private lateinit var locationManager: LocationManager
     private var navigating = false
     private var demo = false
+    private var demoPaused = false
+    private var demoTickGeneration = 0L
     private var routeDestination: GeoPoint? = null
     private var pendingStops = listOf<GeoPoint>()
     private val reroutePolicy = ReroutePolicy()
     private var navigationSession = 0L
     private var voiceEngineSettingsOpened = false
     private var map3d = true
+    private var mapVisualStyle = RallyMapStyle.DARK
     private val drivingCamera = DrivingCamera()
     // Avoid uploading image textures to MapLibre on every GPS fix (often 1 Hz).
     private var vehicleImageStyle: Style? = null
     private val vehicleImageKeys = mutableSetOf<String>()
     private var followRouteCamera = true
+    private var lastRenderedProgress = -1000.0
     private var voiceOn = true
     private var appLanguage = "es-AR"
     private var warnFactor = 1
@@ -160,19 +166,20 @@ class MainActivity : Activity(), LocationListener {
         appLanguage = RallyLanguage.normalized(prefs.getString(RallyLanguage.KEY, RallyLanguage.defaultFor(Locale.getDefault())))
         voiceOn = prefs.getBoolean("voice", true)
         warnFactor = prefs.getInt("anticipation", 1)
+        mapVisualStyle = RallyMapStyle.fromStored(prefs.getString("map_visual_style", "dark"))
         buildUI()
         mapView.getMapAsync { loaded ->
             map = loaded
             loaded.uiSettings.isAttributionEnabled = true
             loaded.uiSettings.isLogoEnabled = true
             loaded.uiSettings.isCompassEnabled = true
-            loaded.setStyle(Style.Builder().fromUri("https://tiles.openfreemap.org/styles/dark")) {
-                drawPlan()
-                drawWaypoints()
-                drawRoadBumps()
-                drawLocation()
-            }
+            installMapStyle(loaded)
             loaded.addOnMapLongClickListener { latlng ->
+                if (navigating || demo || demoPaused) {
+                    // No destination or road edits while driving.
+                    Toast.makeText(this, "Finalizá el recorrido antes de editar el mapa", Toast.LENGTH_SHORT).show()
+                    true
+                } else {
                 val point = GeoPoint(latlng.latitude, latlng.longitude)
                 when (mapSelectMode) {
                     1 -> { chosenOrigin = point; status("Origen elegido manualmente", false) }
@@ -197,9 +204,10 @@ class MainActivity : Activity(), LocationListener {
                 destinationTapArmed = false
                 drawWaypoints()
                 true
+                }
             }
             loaded.addOnMapClickListener { position ->
-                if (recceMapSelection && !navigating && !demo) {
+                if (recceMapSelection && !navigating && !demo && !demoPaused) {
                     recceMapSelection = false
                     val route = plan
                     val selected = if (route != null) route.notes.indices.minByOrNull { index ->
@@ -219,12 +227,12 @@ class MainActivity : Activity(), LocationListener {
                         else Toast.makeText(this, "No hay una curva a menos de 90 metros", Toast.LENGTH_SHORT).show()
                     }
                     true
-                } else if (destinationTapArmed && !navigating && !demo) {
+                } else if (destinationTapArmed && !navigating && !demo && !demoPaused) {
                     chooseDestination(GeoPoint(position.latitude, position.longitude), "PUNTO DEL MAPA")
                     Toast.makeText(this, "✓ Destino elegido", Toast.LENGTH_SHORT).show()
                     true
                 } else {
-                    if (navigating || demo) showDrivingControls(!controlsVisible)
+                    if (navigating || demo || demoPaused) showDrivingControls(!controlsVisible)
                     false
                 }
             }
@@ -388,6 +396,7 @@ class MainActivity : Activity(), LocationListener {
             else -> tr("route")
         }
         if (demo) nextButton.text = tr("pause")
+        if (demoPaused) nextButton.text = tr("resume")
         tripDistance.text = RallyDistanceFormatter.remaining(lastRemainingMetres) + " " + tr("remaining")
         if (plan == null) resetNoteCard(sky, "RALLY GPS AI", tr("dest"), tr("dest_sub"))
         else {
@@ -656,29 +665,41 @@ class MainActivity : Activity(), LocationListener {
         }
         bottom.addView(actionRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(9) })
 
-        toolsRow = row(4) {
-            pointsButton = button(tr("points")).apply { textSize=10f; setOnClickListener { showPointOptions() } }
-            add(pointsButton, 0, dp(46),1f)
+        toolsRow = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val mainTools = row(8) {
+            pointsButton = button(tr("points")).apply { textSize=13f; contentDescription="Marcar origen, destino o reductor"; setOnClickListener { showPointOptions() } }
+            add(pointsButton, 0, dp(50),1f)
             recceButton = button(tr("recce_short")).apply {
-                textSize=10f; contentDescription=tr("recce")
+                textSize=13f; contentDescription=tr("recce")
                 setOnClickListener { showRecce() }
             }
-            add(recceButton, 0, dp(46),1f)
+            add(recceButton, 0, dp(50),1f)
             historyButton = button("HIST.").apply {
-                textSize=10f; contentDescription=tr("history")
+                textSize=13f; contentDescription=tr("history")
                 setOnClickListener { showTripHistory() }
             }
-            add(historyButton, 0, dp(46),1f)
-            add(button("GPX ↓").apply { textSize=10f;setOnClickListener { importGpx() } }, 0,dp(46),1f)
-            add(button("GPX ↑").apply { textSize=10f;setOnClickListener { exportGpx() } }, 0,dp(46),1f)
-            settingsButton = button("⚙").apply {
-                textSize=21f
-                contentDescription=tr("settings")
+            add(historyButton, 0, dp(50),1f)
+        }
+        val secondaryTools = row(8) {
+            add(button(tr("gpx_import")).apply {
+                textSize=12f; contentDescription="Importar ruta GPX"
+                setOnClickListener { importGpx() }
+            }, 0, dp(50), 1f)
+            add(button(tr("gpx_export")).apply {
+                textSize=12f; contentDescription="Guardar ruta GPX"
+                setOnClickListener { exportGpx() }
+            }, 0, dp(50), 1f)
+            settingsButton = button("⚙  AJUSTES").apply {
+                textSize=13f; contentDescription=tr("settings")
                 tooltipText=tr("settings")
                 setOnClickListener { showSettings() }
             }
-            add(settingsButton,0,dp(46),1f)
+            add(settingsButton,0,dp(50),1f)
         }
+        toolsRow.addView(mainTools)
+        toolsRow.addView(secondaryTools, LinearLayout.LayoutParams(-1,-2).apply {
+            topMargin=dp(7)
+        })
         bottom.addView(toolsRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
         bottomPanel = bottom
         root.addView(bottom, FrameLayout.LayoutParams(-1,-2,Gravity.BOTTOM).apply {
@@ -719,7 +740,8 @@ class MainActivity : Activity(), LocationListener {
     /** Keep the large rally board by default; compact mode frees extra map space. */
     private fun applyNoteViewMode() {
         if (!::primaryNoteTile.isInitialized || !::linkedNoteTile.isInitialized) return
-        val compact = prefs.getBoolean("compact_notes", false)
+        val compact = prefs.getBoolean("compact_notes", false) ||
+            resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
         val p = primaryNoteTile.layoutParams as? LinearLayout.LayoutParams
         p?.width = dp(if (compact) 56 else 78)
         p?.height = dp(if (compact) 56 else 78)
@@ -770,6 +792,7 @@ class MainActivity : Activity(), LocationListener {
 
     private fun chooseDestination(point: GeoPoint, name: String, approximate: Boolean = false) {
         target = point
+        hideSearchKeyboard()
         destinationTapArmed = false
         updateDestinationIndicator(name, approximate)
         drawWaypoints()
@@ -831,11 +854,11 @@ class MainActivity : Activity(), LocationListener {
         }
     }
     private fun mainAction() {
-        if (navigating || demo) {
+        if (navigating || demo || demoPaused) {
             finishRealTrip()
             navigationSession++
             reroutePolicy.reset()
-            navigating = false; demo = false; tts?.stop(); rallyAudio.stop(); lastSpoken = -1
+            navigating = false; demo = false; demoPaused = false; ++demoTickGeneration; updateScreenAwake(); tts?.stop(); rallyAudio.stop(); lastSpoken = -1
             contextualCopilot.reset(); lastPriorityNoteAtMs = -1L
             showDrivingControls(true)
             bumpBanner.visibility = View.GONE
@@ -905,14 +928,16 @@ class MainActivity : Activity(), LocationListener {
         val parsed = correctedRoute(sourcePlan)
         navigationSession++
         reroutePolicy.reset()
-        routeDestination = parsed.points.lastOrNull()
+        // A GPX is not necessarily a drivable road; OSRM destinations are assigned
+        // only after the server verifies the route.
+        routeDestination = null
         pendingStops = emptyList()
         updateDestinationIndicator()
         if (save) prefs.edit().remove("last_road_destination").remove("last_road_stops").apply()
         plan = parsed; navigator = NavigationEngine(parsed) { warnFactor }; drivingCamera.reset()
         contextualCopilot.reset(); lastPriorityNoteAtMs = -1L
         positionIndex = 0; lastSpoken = -1; currentNote = 0
-        navigating = false; demo = false; demoPosition = 0.0
+        navigating = false; demo = false; demoPaused = false; ++demoTickGeneration; updateScreenAwake(); demoPosition = 0.0
         action.text = tr("go"); nextButton.text = "DEMO"
         showDrivingControls(false)
         val km = "%.1f".format(Locale.US, parsed.totalMetres / 1000.0)
@@ -921,6 +946,8 @@ class MainActivity : Activity(), LocationListener {
         lastRemainingMetres = parsed.totalMetres
         tripDistance.text = "$km km " + tr("remaining")
         drawPlan()
+        lastRenderedProgress = -1000.0
+        updateRouteProgress(0.0)
         refreshRoadBumps()
         if (save && parsed.points.size <= 30000) prefs.edit().putString("last_route", RouteStore.serialize(parsed.points)).apply()
         val center = parsed.points[parsed.points.size/2]
@@ -973,6 +1000,21 @@ class MainActivity : Activity(), LocationListener {
         advance(0)
     }
 
+    private fun updateScreenAwake() {
+        if (navigating || demo) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+
+    private fun hideSearchKeyboard() {
+        if (!::searchInput.isInitialized) return
+        val manager = getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager
+        manager?.hideSoftInputFromWindow(searchInput.windowToken, 0)
+        searchInput.clearFocus()
+    }
+
     private fun startGpsNavigation() {
         if (plan == null) { status("Primero elegí un recorrido", true); return }
         if (gps == null) { requestGps(); status("Esperando GPS", true); return }
@@ -984,6 +1026,8 @@ class MainActivity : Activity(), LocationListener {
         navigationSession++
         reroutePolicy.reset()
         navigating = true; demo = false; positionIndex = 0; lastSpoken = -1; currentNote = 0
+        updateScreenAwake()
+        hideSearchKeyboard()
         realTripRecorder = RealTripRecorder(System.currentTimeMillis(), SystemClock.elapsedRealtime(),
             plan?.points.orEmpty())
         navigator?.reset(); drivingCamera.reset(); followRouteCamera = true; showDrivingControls(false)
@@ -996,7 +1040,23 @@ class MainActivity : Activity(), LocationListener {
         }
     }
     private fun startDemo() {
-        if (demo) { demo=false; contextualCopilot.reset(); nextButton.text="DEMO"; action.text=tr("go"); showDrivingControls(true); return }
+        if (demo) {
+            demo = false
+            updateScreenAwake()
+            ++demoTickGeneration
+            demoPaused = true
+            nextButton.text = tr("resume")
+            action.text = tr("finish")
+            // Keep the note cursor, route progress and spoken state intact.
+            tts?.stop()
+            rallyAudio.stop()
+            showDrivingControls(false)
+            return
+        }
+        if (demoPaused) {
+            beginDemo(resuming = true)
+            return
+        }
         // Never draw a fabricated road through real city blocks. A DEMO may simulate
         // movement on an already calculated road route or a user-imported GPX only.
         if (!DemoRoutePolicy.canStart(plan)) {
@@ -1015,25 +1075,40 @@ class MainActivity : Activity(), LocationListener {
         startCountdown { beginDemo() }
     }
 
-    private fun beginDemo() {
+    private fun beginDemo(resuming: Boolean = false) {
         if (!DemoRoutePolicy.canStart(plan) || isFinishing || isDestroyed) return
-        navigationSession++
-        reroutePolicy.reset()
-        demo = true; navigating = false; demoPosition = 0.0; positionIndex=0; lastSpoken=-1
-        navigator?.reset(); drivingCamera.reset(); followRouteCamera = true; showDrivingControls(false)
-        contextualCopilot.reset(); lastPriorityNoteAtMs = -1L
+        if (!resuming) {
+            navigationSession++
+            reroutePolicy.reset()
+            demoPosition = 0.0; positionIndex = 0; lastSpoken = -1
+            navigator?.reset(); drivingCamera.reset()
+            contextualCopilot.reset(); lastPriorityNoteAtMs = -1L
+        }
+        demo = true; demoPaused = false; navigating = false
+        updateScreenAwake()
+        hideSearchKeyboard()
+        followRouteCamera = true
+        showDrivingControls(false)
         action.text = tr("finish"); nextButton.text=tr("pause")
+        val tickVersion = ++demoTickGeneration
         val tick = object : Runnable {
             override fun run() {
-                if (!demo) return
+                if (!demo || tickVersion != demoTickGeneration) return
                 val p = plan ?: return
-                demoPosition += demoSpeed * 0.5
-                val index = p.metresAtPoint.indexOfFirst { it >= demoPosition }.let { if (it<0) p.points.lastIndex else it }
-                positionIndex = index
-                val point = p.points[index]
+                demoPosition = (demoPosition + demoSpeed * 0.5).coerceAtMost(p.totalMetres)
+                val point = DrivingCamera.pointAt(p, demoPosition)
+                positionIndex = p.metresAtPoint.binarySearch(demoPosition).let { found ->
+                    (if(found < 0) -found-2 else found).coerceIn(0, p.points.lastIndex-1)
+                }
                 updateProgress(point, demoSpeed.toFloat())
                 drawPosition(point)
-                if (index >= p.points.lastIndex) { demo=false; action.text=tr("go"); nextButton.text="DEMO"; showDrivingControls(true); return }
+                if (demoPosition >= p.totalMetres - 0.5) {
+                    demo=false; demoPaused=false; ++demoTickGeneration
+                    updateScreenAwake()
+                    action.text=tr("go"); nextButton.text="DEMO"
+                    showDrivingControls(true)
+                    return
+                }
                 ui.postDelayed(this, 500)
             }
         }
@@ -1061,6 +1136,7 @@ class MainActivity : Activity(), LocationListener {
         val remaining = (route.totalMetres-result.fix.metres).coerceAtLeast(0.0)
         lastRemainingMetres = remaining
         currentNote = result.noteIndex.coerceAtLeast(0)
+        updateRouteProgress(result.fix.metres)
         info.text = (if (demo) "DEMO · " else "") + "${(speed*3.6).toInt().coerceAtLeast(0)} km/h"
         tripDistance.text = RallyDistanceFormatter.remaining(remaining) + " " + tr("remaining")
         val next = route.notes.getOrNull(result.noteIndex)
@@ -1104,7 +1180,7 @@ class MainActivity : Activity(), LocationListener {
             navigationSession++
             contextualCopilot.reset()
             reroutePolicy.reset()
-            navigating = false; demo = false; action.text = tr("go")
+            navigating = false; demo = false; demoPaused = false; updateScreenAwake(); action.text = tr("go")
             bumpBanner.visibility = View.GONE
             showDrivingControls(true)
         }
@@ -1143,6 +1219,8 @@ class MainActivity : Activity(), LocationListener {
                             .putString("last_route", RouteStore.serialize(updated.points))
                             .putString("last_road_stops", RouteStore.serialize(stopsAhead)).apply()
                         drawPlan()
+                        lastRenderedProgress = -1000.0
+                        updateRouteProgress(0.0)
                         refreshRoadBumps()
                         updateProgress(current, lastLocation?.speed ?: 0f)
                         status("Nueva ruta calculada · notas actualizadas", false)
@@ -1297,6 +1375,30 @@ class MainActivity : Activity(), LocationListener {
         if (voiceOn && speakReady) tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "rally_${System.nanoTime()}")
     }
 
+    /** The completed section is only a visual layer; notes/routing remain unchanged. */
+    private fun updateRouteProgress(progressM: Double) {
+        val route = plan ?: return
+        val style = map?.style ?: return
+        if (!progressM.isFinite() || kotlin.math.abs(progressM-lastRenderedProgress) < 8.0) return
+        val split = RouteProgressGeometry.at(route, progressM)
+        val points = split.travelled
+        if(points.size < 2) return
+        val line = Feature.fromGeometry(LineString.fromLngLats(points.map {
+            Point.fromLngLat(it.longitude,it.latitude)
+        }))
+        val collection = FeatureCollection.fromFeatures(arrayOf(line))
+        val source = style.getSourceAs<GeoJsonSource>("rally_completed_route")
+        if(source == null) {
+            style.addSource(GeoJsonSource("rally_completed_route",collection))
+            val layer=LineLayer("rally_completed_line","rally_completed_route").withProperties(
+                lineColor("#4B6177"),lineWidth(7f),lineOpacity(0.90f))
+            if(style.getLayer("rally_curves_layer") != null)
+                style.addLayerBelow(layer,"rally_curves_layer")
+            else style.addLayer(layer)
+        } else source.setGeoJson(collection)
+        lastRenderedProgress = progressM
+    }
+
     private fun drawPlan() {
         val s = map?.style ?: return
         val p = plan ?: return
@@ -1360,6 +1462,7 @@ class MainActivity : Activity(), LocationListener {
         }
         drawRoadBumps()
         raiseWaypointLayers()
+        if (navigating || demo) updateRouteProgress(if(demo) demoPosition else navigator?.locate(gps ?: p.points.first())?.metres ?: 0.0)
     }
     /**
      * OSM is an optional enhancement; missing data or network errors never claim the
@@ -1430,12 +1533,16 @@ class MainActivity : Activity(), LocationListener {
             else "REGISTRADO EN OSM"
         bumpBanner.text = "⚠ REDUCTOR · $distanceText  ·  $sourceLabel"
         bumpBanner.visibility = View.VISIBLE
-        val canSpeak = voiceOn && speakReady && speedMps >= 2.0 &&
-            distance in 45.0..160.0 && !priorityNote && distanceToNote >= 250.0 &&
-            (lastPriorityNoteAtMs < 0 || nowMs-lastPriorityNoteAtMs >= 15_000L) &&
-            tts?.isSpeaking != true && !rallyAudio.isBusy() && !reroutePolicy.isBusy()
+        val elapsed = if (lastPriorityNoteAtMs < 0) 30_000L else nowMs-lastPriorityNoteAtMs
+        val busy = tts?.isSpeaking == true || rallyAudio.isBusy() || reroutePolicy.isBusy()
+        val canSpeak = voiceOn && speakReady &&
+            RallySafetySpeech.mayAlert(distance,speedMps,distanceToNote,priorityNote,busy,elapsed)
         if (canSpeak && announcedBumps.add(upcoming.raw.id)) {
-            say("Atención, ${TrafficCalming.voiceName(upcoming.raw.kind)} registrado en el mapa")
+            say(when {
+                appLanguage.startsWith("en") -> "Caution, mapped traffic calming ahead. Confirm visually."
+                appLanguage.startsWith("pt") -> "Atenção, redutor sinalizado no mapa. Confira visualmente."
+                else -> "Atención, ${TrafficCalming.voiceName(upcoming.raw.kind)} señalado en el mapa. Verificá visualmente."
+            })
         }
     }
 
@@ -1452,7 +1559,9 @@ class MainActivity : Activity(), LocationListener {
         }
         val origin = chosenOrigin ?: plan?.points?.firstOrNull()
         origin?.let { marker(it, "ORIGEN", "origin") }
-        (target ?: routeDestination)?.let { marker(it, "DESTINO", "destination") }
+        (target ?: routeDestination ?: plan?.points?.lastOrNull())?.let {
+            marker(it, "DESTINO", "destination")
+        }
         intermediatePoints.forEachIndexed { index, p -> marker(p, "PARADA ${index+1}", "stop") }
         val features = FeatureCollection.fromFeatures(markers)
         val source = style.getSourceAs<GeoJsonSource>("rally_waypoints")
@@ -1494,8 +1603,8 @@ class MainActivity : Activity(), LocationListener {
      */
     private fun carBearing(point: GeoPoint): Float {
         val route = plan
-        if ((navigating || demo) && route != null && route.points.size >= 2) {
-            val metres = if (demo) demoPosition else navigator?.locate(point)?.metres ?: 0.0
+        if ((navigating || demo || demoPaused) && route != null && route.points.size >= 2) {
+            val metres = if (demo || demoPaused) demoPosition else navigator?.locate(point)?.metres ?: 0.0
             val a = DrivingCamera.pointAt(route, (metres - 4.0).coerceAtLeast(0.0))
             val b = DrivingCamera.pointAt(route, (metres + 20.0).coerceAtMost(route.totalMetres))
             if (DrivingCamera.distance(a,b) >= 1.0) return DrivingCamera.bearing(a,b).toFloat()
@@ -1558,7 +1667,7 @@ class MainActivity : Activity(), LocationListener {
                     "xl" -> if (selected == RallyVehicles.DEFAULT) 3.7f else 3.0f
                     else -> if (selected == RallyVehicles.DEFAULT) 2.85f else 2.35f
                 }
-                val bearing = (if (demo) plan?.points?.getOrNull(positionIndex) else gps)
+                val bearing = (if (demo || demoPaused) plan?.points?.getOrNull(positionIndex) else gps)
                     ?.let { carBearing(it) } ?: 0f
                 val layer = style.getLayerAs<SymbolLayer>("rally_car_layer")
                 if (layer == null) {
@@ -1586,6 +1695,41 @@ class MainActivity : Activity(), LocationListener {
             visibility(if (activeCar) Property.VISIBLE else Property.NONE))
         style.getLayer("rally_me_layer")?.setProperties(
             visibility(if (activeCar) Property.NONE else Property.VISIBLE))
+    }
+
+    private fun installMapStyle(current: MapLibreMap? = map) {
+        val activeMap = current ?: return
+        vehicleImageStyle = null
+        vehicleImageKeys.clear()
+        lastRenderedProgress = -1000.0
+        activeMap.setStyle(Style.Builder().fromUri(mapVisualStyle.url)) {
+            drawPlan()
+            drawWaypoints()
+            drawRoadBumps()
+            drawLocation()
+            raiseWaypointLayers()
+            val route = plan
+            if (route != null && (navigating || demo)) {
+                updateRouteProgress(if (demo) demoPosition else
+                    navigator?.locate(gps ?: route.points.first())?.metres ?: 0.0)
+            }
+        }
+    }
+
+    private fun chooseMapStyle() {
+        if (navigating || demo) {
+            status("Cambiá el diseño del mapa con la navegación detenida", true)
+            return
+        }
+        val available = arrayOf(tr("map_dark"), tr("map_day"))
+        android.app.AlertDialog.Builder(this).setTitle(tr("map_style"))
+            .setSingleChoiceItems(available, if(mapVisualStyle == RallyMapStyle.DARK) 0 else 1) { dialog, index ->
+                mapVisualStyle = if(index==0) RallyMapStyle.DARK else RallyMapStyle.DAY
+                prefs.edit().putString("map_visual_style",mapVisualStyle.id).apply()
+                installMapStyle()
+                dialog.dismiss()
+            }
+            .setNegativeButton(tr("back"),null).show()
     }
 
     private fun selectVehicleMarkerSize() {
@@ -1686,12 +1830,17 @@ class MainActivity : Activity(), LocationListener {
             (resources.displayMetrics.heightPixels * 0.81f).toInt())
     }
 
-    private fun drawLocation() { gps?.let { drawPosition(it) } }
+    private fun drawLocation() {
+        val current = if (demo || demoPaused) plan?.let {
+            DrivingCamera.pointAt(it,demoPosition)
+        } else gps
+        current?.let { drawPosition(it) }
+    }
     private fun toggle3D() {
         map3d = !map3d
         modeButton.text = if (map3d) "3D" else "2D"
         drivingCamera.reset()
-        val live = if (demo) plan?.points?.getOrNull(positionIndex) else gps
+        val live = if (demo || demoPaused) plan?.points?.getOrNull(positionIndex) else gps
         if ((navigating || demo) && live != null) drawPosition(live)
         else (gps ?: plan?.points?.firstOrNull())?.let { point ->
             map?.animateCamera(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder()
@@ -1700,9 +1849,9 @@ class MainActivity : Activity(), LocationListener {
         }
     }
     private fun centerGps() {
-        if (navigating || demo) {
+        if (navigating || demo || demoPaused) {
             followRouteCamera = true
-            val current = if (demo) plan?.points?.getOrNull(positionIndex) else gps
+            val current = if (demo || demoPaused) plan?.points?.getOrNull(positionIndex) else gps
             current?.let { drawPosition(it) }
             return
         }
@@ -1727,26 +1876,33 @@ class MainActivity : Activity(), LocationListener {
     }
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode==900 && grantResults.any{it==PackageManager.PERMISSION_GRANTED}) requestGps()
+        if (requestCode==900) {
+            if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+                requestGps()
+            } else {
+                status("Para notas de rally y velocidad necesitás ubicación precisa", true)
+            }
+        }
         else if (requestCode==900) status("Podés usar GPX y DEMO sin permiso GPS",true)
     }
     override fun onLocationChanged(location: Location) {
-        if (location.hasAccuracy() && location.accuracy > 65f) {
-            if (navigating) status("Señal GPS débil: esperando precisión", true)
+        val ageMs = (android.os.SystemClock.elapsedRealtimeNanos() -
+            location.elapsedRealtimeNanos) / 1_000_000L
+        val accuracy = if (location.hasAccuracy()) location.accuracy else null
+        if (!GpsFixPolicy.usable(location.latitude,location.longitude,accuracy,ageMs)) {
+            if (navigating) status("GPS poco preciso: esperando señal confiable", true)
             return
         }
-        val ageNs = android.os.SystemClock.elapsedRealtimeNanos() - location.elapsedRealtimeNanos
-        if (ageNs > 15_000_000_000L || ageNs < -2_000_000_000L) return
+        val speed = GpsFixPolicy.safeSpeed(location.speed,location.hasSpeed())
         gps = GeoPoint(location.latitude,location.longitude); lastLocation=location
         if (navigating) {
-            realTripRecorder?.accept(gps!!, location.speed,
-                if (location.hasAccuracy()) location.accuracy else 100f,
+            realTripRecorder?.accept(gps!!,speed,accuracy ?: 100f,
                 SystemClock.elapsedRealtime())
-            updateProgress(gps!!, location.speed)
+            updateProgress(gps!!, speed)
         }
-        if (!demo) drawPosition(gps!!)
+        if (!demo && !demoPaused) drawPosition(gps!!)
         if (firstGpsCamera) { firstGpsCamera=false; if (!navigating) centerGps() }
-        if (!navigating && !demo) status("GPS disponible · mantené pulsado el mapa para elegir destino",false)
+        if (!navigating && !demo && !demoPaused) status("GPS disponible · mantené pulsado el mapa para elegir destino",false)
     }
 
     private fun importGpx() {
@@ -2146,8 +2302,10 @@ class MainActivity : Activity(), LocationListener {
     }
     private fun showDrivingControls(show: Boolean) {
         controlsVisible = show
-        searchRow.visibility = if (navigating || demo) View.GONE else View.VISIBLE
-        toolsRow.visibility = if (navigating || demo) { if (show) View.VISIBLE else View.GONE } else View.VISIBLE
+        val state = NavigationUiPolicy.state(navigating, demo || demoPaused, show, plan != null)
+        searchRow.visibility = if (state.showSearch) View.VISIBLE else View.GONE
+        // Edit, import and export are never offered while the phone is navigating.
+        toolsRow.visibility = if (!navigating && !demo && !demoPaused) View.VISIBLE else View.GONE
         updateDestinationIndicator()
     }
 
@@ -2194,7 +2352,7 @@ class MainActivity : Activity(), LocationListener {
         val indices: List<Int> = when (section) {
             0 -> listOf(0,1,2,3,4,15)
             1 -> listOf(5,6,13,7,8,9)
-            2 -> listOf(11,14)
+            2 -> listOf(11,14,16)
             else -> listOf(12,10)
         }
         val labelFor: (Int) -> String = { index ->
@@ -2215,6 +2373,7 @@ class MainActivity : Activity(), LocationListener {
                 13 -> tr("context_menu")
                 14 -> tr("vehicle_size")
                 15 -> tr("note_view")
+                16 -> tr("map_style")
                 else -> ""
             }
         }
@@ -2258,6 +2417,7 @@ class MainActivity : Activity(), LocationListener {
             13 -> selectContextualMode()
             14 -> selectVehicleMarkerSize()
             15 -> selectNoteViewMode()
+            16 -> chooseMapStyle()
         }
     }
 
@@ -2278,7 +2438,7 @@ class MainActivity : Activity(), LocationListener {
         countdownDialog?.dismiss()
         countdownDialog = null
         finishRealTrip()
-        demo=false; navigating=false; ui.removeCallbacksAndMessages(null)
+        demo=false; demoPaused=false; ++demoTickGeneration; navigating=false; updateScreenAwake(); ui.removeCallbacksAndMessages(null)
         locationManager.removeUpdates(this)
         rallyAudio.stop()
         tts?.stop();tts?.shutdown()
