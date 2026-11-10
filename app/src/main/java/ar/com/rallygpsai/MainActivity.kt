@@ -679,11 +679,11 @@ class MainActivity : Activity(), LocationListener {
             add(historyButton, 0, dp(50),1f)
         }
         val secondaryTools = row(8) {
-            add(button("IMPORTAR ↓").apply {
+            add(button(tr("gpx_import")).apply {
                 textSize=12f; contentDescription="Importar ruta GPX"
                 setOnClickListener { importGpx() }
             }, 0, dp(50), 1f)
-            add(button("EXPORTAR ↑").apply {
+            add(button(tr("gpx_export")).apply {
                 textSize=12f; contentDescription="Guardar ruta GPX"
                 setOnClickListener { exportGpx() }
             }, 0, dp(50), 1f)
@@ -1697,8 +1697,8 @@ class MainActivity : Activity(), LocationListener {
             status("Cambiá el diseño del mapa con la navegación detenida", true)
             return
         }
-        val available = arrayOf("NOCHE · oscuro", "DÍA · calles claras")
-        android.app.AlertDialog.Builder(this).setTitle("ESTILO DEL MAPA")
+        val available = arrayOf(tr("map_dark"), tr("map_day"))
+        android.app.AlertDialog.Builder(this).setTitle(tr("map_style"))
             .setSingleChoiceItems(available, if(mapVisualStyle == RallyMapStyle.DARK) 0 else 1) { dialog, index ->
                 mapVisualStyle = if(index==0) RallyMapStyle.DARK else RallyMapStyle.DAY
                 prefs.edit().putString("map_visual_style",mapVisualStyle.id).apply()
@@ -2344,7 +2344,7 @@ class MainActivity : Activity(), LocationListener {
                 13 -> tr("context_menu")
                 14 -> tr("vehicle_size")
                 15 -> tr("note_view")
-                16 -> "Estilo del mapa · día/noche"
+                16 -> tr("map_style")
                 else -> ""
             }
         }
