@@ -97,7 +97,7 @@ object OSMTrafficCalmingService {
         if ((north-south)*(east-west) > 0.03 || north-south > 0.20 || east-west > 0.20) return emptyList()
         val bbox = listOf(south,west,north,east).joinToString(",") { "%.6f".format(java.util.Locale.US,it) }
         val q = "[out:json][timeout:12];node[traffic_calming~\"^(bump|hump|table|cushion|rumble_strip|mini_bumps)$\"]($bbox);out body;"
-        val url = URL("https://overpass.kumi.systems/api/interpreter")
+        val url = URL("https://overpass.private.coffee/api/interpreter")
         val con = url.openConnection() as HttpURLConnection
         con.requestMethod="POST"
         con.doOutput=true
